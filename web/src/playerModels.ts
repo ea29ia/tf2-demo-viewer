@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 
 // Real player models ("Civilian pose", static glTF, no skins).
 // The GLBs are Y-up, origin at the feet, Source-scale (~72 units tall).
@@ -34,7 +35,11 @@ const templates = new Map<string, PlayerModelTemplate | null>();
 const pending = new Map<string, Promise<PlayerModelTemplate | null>>();
 const warned = new Set<string>();
 
+const draco = new DRACOLoader();
+draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
+
 const loader = new GLTFLoader();
+loader.setDRACOLoader(draco);
 
 const BASE = import.meta.env.BASE_URL;
 
