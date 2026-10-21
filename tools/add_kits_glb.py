@@ -73,6 +73,11 @@ def main(argv) -> int:
         (3, 0, 4, 7),    # -x
     ]
 
+    # Click-to-inspect metadata: append kit entries to the main mesh node's
+    # extras (add_props_glb.py created the extras object there).
+    main_node = next((n for n in gltf["nodes"] if n.get("mesh") == 0), None)
+    kit_entries = []
+
     added = 0
     skipped = 0
     half_x, half_y, h = PLATE[0] / 2.0, PLATE[1] / 2.0, PLATE[2]
@@ -105,6 +110,11 @@ def main(argv) -> int:
             indices.extend((vbase + a, vbase + c, vbase + d))
         vertex_count += 8
         added += 1
+        kit_entries.append({
+            "n": f"kit:{cls}",
+            "p": [round(x, 1), round(y, 1), round(oz + h / 2.0, 1)],
+            "s": [PLATE[0], PLATE[1], PLATE[2]],
+        })
 
     pos_bytes = pad4(positions.tobytes())
     nrm_bytes = pad4(normals.tobytes())
@@ -164,6 +174,12 @@ def main(argv) -> int:
         # Accessor indices stay 4..7 (same as add_props_glb.py emitted); only
         # the bufferView offsets changed. Counts/min/max are unchanged.
 
+    if main_node is not None and kit_entries:
+        extras = main_node.setdefault("extras", {})
+        props = list(extras.get("props", []))
+        props.extend(kit_entries)
+        extras["props"] = props
+
     json_blob = pad4(json.dumps(gltf, separators=(",", ":")).encode("utf-8"), b" ")
     total = 12 + 8 + len(json_blob) + 8 + len(bin_out)
     with open(glb_path, "wb") as f:
@@ -174,6 +190,7 @@ def main(argv) -> int:
         f.write(bin_out)
 
     print(f"kits added: {added}, skipped: {skipped} (of {len(kits)})", file=sys.stderr)
+    print(f"kit extras entries: {len(kit_entries)}", file=sys.stderr)
     print(f"wrote {glb_path}: {vertex_count} vertices, {len(indices) // 3} triangles",
           file=sys.stderr)
     return 0

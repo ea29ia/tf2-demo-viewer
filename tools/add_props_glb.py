@@ -34,6 +34,19 @@ SIZES = [
 ]
 DEFAULT_SIZE = (64, 64, 64)
 
+# Mine-cart track props: exact length along local X, uniform 34 wide x 16 high
+# rail profile. Matched before the generic SIZES table (checked first).
+TRACK_SIZES = [
+    ("track_straight_256", (256, 34, 16)),
+    ("track_straight_128", (128, 34, 16)),
+    ("track_straight_64", (64, 34, 16)),
+    ("track_s_curve_96", (96, 34, 16)),
+    ("track_s_curve_48", (48, 34, 16)),
+    ("track_arc_90degree_256", (256, 34, 16)),
+    ("track_arc_90degree_128", (128, 34, 16)),
+    ("track_y_joint", (128, 48, 16)),
+]
+
 # Non-walkable foliage props go into a separate mesh ("foliage") so the web
 # viewer can hide them with a checkbox.
 FOLIAGE_KEYWORDS = ("grass", "bush", "shrub", "weed", "foliage", "plant",
@@ -61,10 +74,42 @@ def color_for(name: str):
 
 def size_for(name: str):
     n = name.lower()
+    for key, size in TRACK_SIZES:
+        if key in n:
+            return size
     for keys, size in SIZES:
         if any(k in n for k in keys):
             return size
     return DEFAULT_SIZE
+
+
+def rotation_matrix(pitch: float, yaw: float, roll: float):
+    """Source QAngle (degrees) -> 3x3 rotation matrix R = Rz(yaw)*Ry(pitch)*Rx(roll).
+
+    Source convention: pitch about Y, yaw about Z (CCW seen from above in XY),
+    roll about X.
+    """
+    p, y, r = (math.radians(a) for a in (pitch, yaw, roll))
+    cp, sp, cy, sy, cr, sr = (
+        math.cos(p), math.sin(p), math.cos(y), math.sin(y), math.cos(r), math.sin(r))
+    rz = ((cy, -sy, 0.0), (sy, cy, 0.0), (0.0, 0.0, 1.0))
+    ry = ((cp, 0.0, sp), (0.0, 1.0, 0.0), (-sp, 0.0, cp))
+    rx = ((1.0, 0.0, 0.0), (0.0, cr, -sr), (0.0, sr, cr))
+
+    def mul(a, b):
+        return tuple(
+            tuple(sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3))
+            for i in range(3))
+
+    return mul(mul(rz, ry), rx)
+
+
+def apply_rot(m, v):
+    return (
+        m[0][0] * v[0] + m[0][1] * v[1] + m[0][2] * v[2],
+        m[1][0] * v[0] + m[1][1] * v[1] + m[1][2] * v[2],
+        m[2][0] * v[0] + m[2][1] * v[1] + m[2][2] * v[2],
+    )
 
 
 def load_glb(path: str):
@@ -140,14 +185,30 @@ def main(argv) -> int:
     f_added = 0
 
     def emit_box(positions, normals, colors, indices, vertex_count,
-                 ox, oy, oz, top, corners, color):
-        face_normals = (
+                 ox, oy, oz, rot, sx, sy, h, color):
+        # Full rotation: local box corners transformed by R(pitch, yaw, roll).
+        # Length axis is local X; the matrix orients the box in world space.
+        hx, hy = sx / 2.0, sy / 2.0
+        local = [
+            (-hx, -hy, 0.0), (hx, -hy, 0.0), (hx, hy, 0.0), (-hx, hy, 0.0),
+            (-hx, -hy, h), (hx, -hy, h), (hx, hy, h), (-hx, hy, h),
+        ]
+        verts = [
+            tuple((ox, oy, oz)[k] + apply_rot(rot, c)[k] for k in range(3))
+            for c in local
+        ]
+        # Local face normals (bottom corners 0-3, top corners 4-7; same face
+        # winding as before), rotated into world space and normalized.
+        face_dirs = (
             (0, 0, 1), (0, 0, -1),
             (0, 1, 0), (0, -1, 0),
             (1, 0, 0), (-1, 0, 0),
         )
-        # Bottom corners (0-3) then top corners (4-7).
-        verts = [(x, y, oz) for x, y in corners] + [(x, y, top) for x, y in corners]
+        face_normals = []
+        for d in face_dirs:
+            n = apply_rot(rot, d)
+            ln = math.sqrt(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]) or 1.0
+            face_normals.append((n[0] / ln, n[1] / ln, n[2] / ln))
         faces = [
             (4, 5, 6, 7),    # top
             (0, 3, 2, 1),    # bottom
@@ -170,14 +231,16 @@ def main(argv) -> int:
             indices.extend((vbase + a, vbase + cc, vbase + d))
         return vertex_count + 8
 
+    prop_entries = []
+
     for i in range(prop_count):
         base = entry + i * probe.PROP_STRIDE
         ox, oy, oz = struct.unpack_from("<3f", data, base)
-        pitch, yaw, _roll = struct.unpack_from("<3f", data, base + 12)
+        pitch, yaw, roll = struct.unpack_from("<3f", data, base + 12)
         pt = struct.unpack_from("<H", data, base + 24)[0]
         name = names[pt] if pt < len(names) else ""
         if pt >= len(names) or not all(
-                math.isfinite(v) for v in (ox, oy, oz, pitch, yaw)):
+                math.isfinite(v) for v in (ox, oy, oz, pitch, yaw, roll)):
             skipped += 1
             continue
         # Skip props that would blow up the bounding box (3D skybox props).
@@ -187,27 +250,33 @@ def main(argv) -> int:
             continue
         sx, sy, h = size_for(name)
         color = color_for(name)
-        top = min(oz + h, WORLD[5])
-        half = (sx / 2.0, sy / 2.0)
-        # Rotate the four horizontal corners by yaw (radians, Source: CCW seen
-        # from above in the XY plane).
-        c, s = math.cos(yaw), math.sin(yaw)
-        corners = []
-        for dx, dy in ((-half[0], -half[1]), (half[0], -half[1]),
-                       (half[0], half[1]), (-half[0], half[1])):
-            corners.append((ox + dx * c - dy * s, oy + dx * s + dy * c))
+        rot = rotation_matrix(pitch, yaw, roll)
+
+        # Compact entry for the web click-to-inspect lookup. Name keeps the
+        # full path minus the models/props_mining/ prefix; p is the box center
+        # (Source coords, Z-up); s is the full size.
+        short = name
+        for prefix in ("models/props_mining/", "models/"):
+            if short.startswith(prefix):
+                short = short[len(prefix):]
+                break
+        prop_entries.append({
+            "n": short,
+            "p": [round(ox, 1), round(oy, 1), round(oz + h / 2.0, 1)],
+            "s": [sx, sy, h],
+        })
 
         if is_foliage(name):
             f_vertex_count = emit_box(
                 f_positions, f_normals, f_colors, f_indices, f_vertex_count,
-                ox, oy, oz, top, corners, color)
+                ox, oy, oz, rot, sx, sy, h, color)
             f_added += 1
             added += 1
             continue
 
         vertex_count = emit_box(
             positions, normals, colors, indices, vertex_count,
-            ox, oy, oz, top, corners, color)
+            ox, oy, oz, rot, sx, sy, h, color)
         added += 1
 
     # Rewrite the GLB with extended buffers (single primitive preserved).
@@ -283,6 +352,13 @@ def main(argv) -> int:
 
     gltf["buffers"] = [{"byteLength": len(bin_out)}]
 
+    # Click-to-inspect metadata: attach compact prop entries as glTF extras on
+    # the main mesh node. GLTFLoader surfaces this as node.userData.extras.
+    if prop_entries:
+        main_node = next((n for n in gltf["nodes"] if n.get("mesh") == 0), None)
+        if main_node is not None:
+            main_node["extras"] = {"props": prop_entries}
+
     json_blob = pad4(json.dumps(gltf, separators=(",", ":")).encode("utf-8"), b" ")
     total = 12 + 8 + len(json_blob) + 8 + len(bin_out)
     with open(glb_path, "wb") as f:
@@ -294,6 +370,7 @@ def main(argv) -> int:
 
     print(f"props added: {added}, skipped: {skipped} (of {prop_count})", file=sys.stderr)
     print(f"foliage props: {f_added} (separate mesh)", file=sys.stderr)
+    print(f"extras entries: {len(prop_entries)}", file=sys.stderr)
     print(f"wrote {glb_path}: {vertex_count} vertices, {len(indices) // 3} triangles",
           file=sys.stderr)
     return 0
