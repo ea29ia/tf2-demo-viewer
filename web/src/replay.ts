@@ -23,6 +23,7 @@
 
 export const RECORD_SIZE = 26;
 export const PROJ_RECORD_SIZE = 17;
+export const HURT_RECORD_SIZE = 15;
 export const MAGIC = 'TF2R';
 export const VERSION = 2;
 
@@ -83,10 +84,22 @@ export interface ProjectileRecord {
   vz: number;
 }
 
+export interface HurtRecord {
+  victim: number;
+  attacker: number;
+  damage: number;
+  flags: number; // bit0 crit, bit1 mini-crit, bit2 fake-crit
+  x: number;
+  y: number;
+  z: number;
+  splash: number;
+}
+
 export interface ReplayFrame {
   tick: number;
   records: PlayerRecord[];
   projectiles: ProjectileRecord[];
+  hurts: HurtRecord[];
 }
 
 export interface Replay {
@@ -228,7 +241,38 @@ export function parseReplay(buffer: ArrayBuffer): Replay {
       }
     }
 
-    frames[f] = { tick, records, projectiles };
+    // v2+: player_hurt (damage) block after projectiles.
+    let hurts: HurtRecord[] = [];
+    if (version >= 2) {
+      if (offset + 2 > total) {
+        throw new Error(`Повреждён replay.bin: обрезан блок урона кадра #${f}`);
+      }
+      const hurtCount = view.getUint16(offset, true);
+      offset += 2;
+      const hbytes = hurtCount * HURT_RECORD_SIZE;
+      if (offset + hbytes > total) {
+        throw new Error(
+          `Повреждён replay.bin: урон кадра #${f} требует ${hbytes} байт, осталось ${total - offset}`,
+        );
+      }
+      hurts = new Array(hurtCount);
+      for (let i = 0; i < hurtCount; i++) {
+        const q = (o: number): number => view.getInt16(offset + o, true) * 4;
+        hurts[i] = {
+          victim: view.getUint16(offset, true),
+          attacker: view.getUint16(offset + 2, true),
+          damage: view.getUint16(offset + 4, true),
+          flags: view.getUint8(offset + 6),
+          x: q(7),
+          y: q(9),
+          z: q(11),
+          splash: q(13),
+        };
+        offset += HURT_RECORD_SIZE;
+      }
+    }
+
+    frames[f] = { tick, records, projectiles, hurts };
   }
 
   // Be tolerant of a producer that writes frames in a different order.

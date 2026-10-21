@@ -149,6 +149,82 @@ fn push_u32(out: &mut Vec<u8>, value: u32) {
     out.extend_from_slice(&value.to_le_bytes());
 }
 
+/// One damage (player_hurt) event, 17-byte on-disk record:
+/// victim u16, attacker u16, damage u16, flags u8, x/y/z i16 x3 (units/4).
+#[derive(Debug, Clone, Copy)]
+struct HurtRecord {
+    victim: u16,
+    attacker: u16,
+    damage: u16,
+    flags: u8, // bit0 crit, bit1 mini-crit, bit2 fake-crit(all see)
+    x: f32,
+    y: f32,
+    z: f32,
+    splash: f32, // radius hint for hitbox visual
+}
+
+impl HurtRecord {
+    fn write(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.victim.to_le_bytes());
+        out.extend_from_slice(&self.attacker.to_le_bytes());
+        out.extend_from_slice(&self.damage.to_le_bytes());
+        out.push(self.flags);
+        out.extend_from_slice(&q16(self.x).to_le_bytes());
+        out.extend_from_slice(&q16(self.y).to_le_bytes());
+        out.extend_from_slice(&q16(self.z).to_le_bytes());
+        out.extend_from_slice(&q16(self.splash).to_le_bytes());
+    }
+}
+
+fn hurt_snapshot(state: &GameState) -> Vec<HurtRecord> {
+    let mut out = Vec::new();
+    for (event_tick, event) in &state.events {
+        if u32::from(*event_tick) != u32::from(state.tick) {
+            continue;
+        }
+        if let tf_demo_parser::demo::gameevent_gen::GameEvent::PlayerHurt(h) = event {
+            let pos = state
+                .players
+                .iter()
+                .find(|p| p.info.as_ref().map(|i| u32::from(i.user_id)) == Some(u32::from(h.user_id)))
+                .map(|p| p.position)
+                .unwrap_or_default();
+            // Explosion weapons: give the hitbox ring a realistic radius.
+            const ROCKET: u16 = 18; // tf_weapon_rocketlauncher
+            const GRENADE: u16 = 19; // tf_weapon_grenadelauncher
+            const STICKY: u16 = 20; // tf_weapon_pipebomblauncher
+            const FLARE: u16 = 12; // flare gun-ish
+            const SENTRY_ROCKET: u16 = 43;
+            let splash = match h.weapon_id {
+                ROCKET | GRENADE | STICKY | SENTRY_ROCKET => 146.0f32,
+                FLARE => 110.0,
+                _ => 0.0,
+            };
+            let mut flags = 0u8;
+            if h.crit {
+                flags |= 1;
+            }
+            if h.mini_crit {
+                flags |= 2;
+            }
+            if h.all_see_crit {
+                flags |= 4;
+            }
+            out.push(HurtRecord {
+                victim: h.user_id,
+                attacker: h.attacker,
+                damage: h.damage_amount,
+                flags,
+                x: pos.x,
+                y: pos.y,
+                z: pos.z,
+                splash,
+            });
+        }
+    }
+    out
+}
+
 fn projectile_snapshot(state: &GameState) -> Vec<ProjectileRecord> {
     state
         .projectiles
@@ -238,6 +314,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let records = snapshot(state);
         let projectiles = projectile_snapshot(state);
+        let hurts = hurt_snapshot(state);
         let mut max_proj = 0usize;
         for filled in start..=tick {
             push_u32(&mut frames, filled);
@@ -260,6 +337,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             frames.extend_from_slice(&(projectiles.len() as u16).to_le_bytes());
             for p in &projectiles {
                 p.write(&mut frames);
+            }
+            frames.extend_from_slice(&(hurts.len() as u16).to_le_bytes());
+            for h in &hurts {
+                h.write(&mut frames);
             }
             max_proj = max_proj.max(projectiles.len());
             frame_count += 1;
