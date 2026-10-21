@@ -2,6 +2,7 @@
 // Open at /modeltest.html. No replay, no map — only model loading and placement.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 
 const CLASS_NAMES = [
   'scout', 'soldier', 'pyro', 'demoman', 'heavy',
@@ -15,6 +16,9 @@ function log(msg: string): void {
   statusEl.textContent += msg + '\n';
   console.log(msg);
 }
+
+const draco = new DRACOLoader();
+draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(window.innerWidth, window.innerHeight);
@@ -41,6 +45,7 @@ const grid = new THREE.GridHelper(6000, 60, 0x445566, 0x223344);
 scene.add(grid);
 
 const loader = new GLTFLoader();
+loader.setDRACOLoader(draco);
 
 async function main(): Promise<void> {
   let row = 0;
