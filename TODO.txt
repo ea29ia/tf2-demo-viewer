@@ -55,3 +55,47 @@
 - Real fix: extract MDLs from a TF2 install/VPK, re-pose or load with bones and
   play actual animations (see "player models" and "prop meshes" items). All
   roads lead to needing TF2 game files (SteamCMD or local install).
+
+## Sniper aim statistics (hit-scan accuracy analysis)
+Idea: for every hit-scan shot fired by a sniper (or any class), reconstruct the
+bullet ray and measure how close it came to the nearest enemy head. Produces a
+real aim-accuracy profile from a demo.
+
+### Data (verified present in demos)
+- `CTEFireBullets` TempEntity: muzzle origin + shot direction + bullet index +
+  flags. Probe on demo_upward1.dem: 4217 hit-scan shots per match.
+- `PlayerShoot` game event: shooter user id, weapon, mode.
+- Player eye positions: `m_vecOrigin` + eye height (~64u) — already in replay.bin.
+- Headshot flag: `PlayerHurt.custom == 1` (TF_CUSTOM_HEADSHOT). Parser reads the
+  field (gameevent_gen PlayerHurtEvent.custom); our replay format does not store
+  it yet (add flag bit to hurt record).
+
+### Algorithm
+1. For each CTEFireBullets: build ray (origin, direction from TE angles).
+2. Find players whose head box (~8x8x10u at eye height) intersects the ray.
+3. For the nearest head within range: compute angular deviation between shot
+   direction and direction to head center (degrees).
+4. Cross-check with player_hurt on the same tick: did it actually headshot
+   (custom==1)?
+
+### Output statistics
+- Hit-rate: % of shots where the ray passed through a head sphere.
+- Angular deviation distribution (median, p25/p75) per player/zoom state.
+- Deviation delta shot-vs-100ms-before (flick accuracy).
+- Hit-rate vs distance buckets.
+
+### Caveats
+- Client-side TE vs server hit registration: direction is authoritative but the
+  server does lag compensation; treat stats as reconstruction with <1-2 deg
+  tolerance.
+- Shotguns send one TE with a pellet counter (multi-pellet suppressed), so
+  per-pellet lines are not available there.
+- Zoom/charge state from conditions can filter scoped vs unscoped shots.
+
+### Implementation plan
+1. replay.bin v3: add `shots` block (tick, shooter entity, origin, dir, weapon,
+   flags) + headshot bit in hurt flags. Update writer + reader + PLAN.md in one
+   commit, bump version, validate.
+2. Statistics pass (offline script or in-viewer): produce per-sniper report.
+3. UI section: select a sniper -> shot list, deviation histogram, hit-rate;
+   optionally draw rays (see hit-scan lines idea).
