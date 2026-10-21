@@ -34,6 +34,16 @@ SIZES = [
 ]
 DEFAULT_SIZE = (64, 64, 64)
 
+# Non-walkable foliage props go into a separate mesh ("foliage") so the web
+# viewer can hide them with a checkbox.
+FOLIAGE_KEYWORDS = ("grass", "bush", "shrub", "weed", "foliage", "plant",
+                    "reeds", "cattail", "ivy", "vine")
+
+
+def is_foliage(name: str) -> bool:
+    n = name.lower()
+    return any(k in n for k in FOLIAGE_KEYWORDS)
+
 
 def color_for(name: str):
     n = name.lower()
@@ -120,33 +130,17 @@ def main(argv) -> int:
 
     added = 0
     skipped = 0
-    for i in range(prop_count):
-        base = entry + i * probe.PROP_STRIDE
-        ox, oy, oz = struct.unpack_from("<3f", data, base)
-        pitch, yaw, _roll = struct.unpack_from("<3f", data, base + 12)
-        pt = struct.unpack_from("<H", data, base + 24)[0]
-        name = names[pt] if pt < len(names) else ""
-        if pt >= len(names) or not all(
-                math.isfinite(v) for v in (ox, oy, oz, pitch, yaw)):
-            skipped += 1
-            continue
-        # Skip props that would blow up the bounding box (3D skybox props).
-        if not (WORLD[0] <= ox <= WORLD[1] and WORLD[2] <= oy <= WORLD[3]
-                and WORLD[4] <= oz <= WORLD[5]):
-            skipped += 1
-            continue
-        sx, sy, h = size_for(name)
-        color = color_for(name)
-        top = min(oz + h, WORLD[5])
-        half = (sx / 2.0, sy / 2.0)
-        # Rotate the four horizontal corners by yaw (radians, Source: CCW seen
-        # from above in the XY plane).
-        c, s = math.cos(yaw), math.sin(yaw)
-        corners = []
-        for dx, dy in ((-half[0], -half[1]), (half[0], -half[1]),
-                       (half[0], half[1]), (-half[0], half[1])):
-            corners.append((ox + dx * c - dy * s, oy + dx * s + dy * c))
+    # Foliage props are accumulated into separate buffers and written as a
+    # second mesh named "foliage" (hideable in the viewer).
+    f_positions = array("f")
+    f_normals = array("f")
+    f_colors = array("f")
+    f_indices = array("I")
+    f_vertex_count = 0
+    f_added = 0
 
+    def emit_box(positions, normals, colors, indices, vertex_count,
+                 ox, oy, oz, top, corners, color):
         face_normals = (
             (0, 0, 1), (0, 0, -1),
             (0, 1, 0), (0, -1, 0),
@@ -174,7 +168,46 @@ def main(argv) -> int:
                 normals[k:k + 3] = array("f", n)
             indices.extend((vbase + a, vbase + b, vbase + cc))
             indices.extend((vbase + a, vbase + cc, vbase + d))
-        vertex_count += 8
+        return vertex_count + 8
+
+    for i in range(prop_count):
+        base = entry + i * probe.PROP_STRIDE
+        ox, oy, oz = struct.unpack_from("<3f", data, base)
+        pitch, yaw, _roll = struct.unpack_from("<3f", data, base + 12)
+        pt = struct.unpack_from("<H", data, base + 24)[0]
+        name = names[pt] if pt < len(names) else ""
+        if pt >= len(names) or not all(
+                math.isfinite(v) for v in (ox, oy, oz, pitch, yaw)):
+            skipped += 1
+            continue
+        # Skip props that would blow up the bounding box (3D skybox props).
+        if not (WORLD[0] <= ox <= WORLD[1] and WORLD[2] <= oy <= WORLD[3]
+                and WORLD[4] <= oz <= WORLD[5]):
+            skipped += 1
+            continue
+        sx, sy, h = size_for(name)
+        color = color_for(name)
+        top = min(oz + h, WORLD[5])
+        half = (sx / 2.0, sy / 2.0)
+        # Rotate the four horizontal corners by yaw (radians, Source: CCW seen
+        # from above in the XY plane).
+        c, s = math.cos(yaw), math.sin(yaw)
+        corners = []
+        for dx, dy in ((-half[0], -half[1]), (half[0], -half[1]),
+                       (half[0], half[1]), (-half[0], half[1])):
+            corners.append((ox + dx * c - dy * s, oy + dx * s + dy * c))
+
+        if is_foliage(name):
+            f_vertex_count = emit_box(
+                f_positions, f_normals, f_colors, f_indices, f_vertex_count,
+                ox, oy, oz, top, corners, color)
+            f_added += 1
+            added += 1
+            continue
+
+        vertex_count = emit_box(
+            positions, normals, colors, indices, vertex_count,
+            ox, oy, oz, top, corners, color)
         added += 1
 
     # Rewrite the GLB with extended buffers (single primitive preserved).
@@ -204,6 +237,52 @@ def main(argv) -> int:
     acc[2]["count"] = vertex_count
     acc[3]["count"] = len(indices)
 
+    # Foliage mesh (optional): appended as mesh 1 + node, sharing the buffer.
+    if f_added > 0 and len(f_indices) > 0:
+        fpos = pad4(f_positions.tobytes())
+        fnrm = pad4(f_normals.tobytes())
+        fcol = pad4(f_colors.tobytes())
+        fidx = pad4(f_indices.tobytes())
+        fbin = b"".join((fpos, fnrm, fcol, fidx))
+        base = len(bin_out)
+        bin_out = bin_out + fbin
+        view_base = len(gltf["bufferViews"])
+        gltf["bufferViews"].extend([
+            {"buffer": 0, "byteOffset": base, "byteLength": len(fpos), "target": 34962},
+            {"buffer": 0, "byteOffset": base + len(fpos), "byteLength": len(fnrm), "target": 34962},
+            {"buffer": 0, "byteOffset": base + len(fpos) + len(fnrm),
+             "byteLength": len(fcol), "target": 34962},
+            {"buffer": 0,
+             "byteOffset": base + len(fpos) + len(fnrm) + len(fcol),
+             "byteLength": len(fidx), "target": 34963},
+        ])
+        fmesh_min = [min(f_positions[i] for i in range(k, len(f_positions), 3)) for k in range(3)]
+        fmesh_max = [max(f_positions[i] for i in range(k, len(f_positions), 3)) for k in range(3)]
+        acc_base = len(gltf["accessors"])
+        gltf["accessors"].extend([
+            {"bufferView": view_base, "componentType": 5126, "count": f_vertex_count,
+             "type": "VEC3", "min": fmesh_min, "max": fmesh_max},
+            {"bufferView": view_base + 1, "componentType": 5126, "count": f_vertex_count,
+             "type": "VEC3"},
+            {"bufferView": view_base + 2, "componentType": 5126, "count": f_vertex_count,
+             "type": "VEC3"},
+            {"bufferView": view_base + 3, "componentType": 5125, "count": len(f_indices),
+             "type": "SCALAR"},
+        ])
+        gltf["meshes"].append({
+            "name": "foliage",
+            "primitives": [{
+                "attributes": {"POSITION": acc_base, "NORMAL": acc_base + 1,
+                               "COLOR_0": acc_base + 2},
+                "indices": acc_base + 3, "mode": 4,
+            }],
+        })
+        node_index = len(gltf["nodes"])
+        gltf["nodes"].append({"mesh": 1, "name": "foliage"})
+        gltf["scenes"][0]["nodes"].append(node_index)
+
+    gltf["buffers"] = [{"byteLength": len(bin_out)}]
+
     json_blob = pad4(json.dumps(gltf, separators=(",", ":")).encode("utf-8"), b" ")
     total = 12 + 8 + len(json_blob) + 8 + len(bin_out)
     with open(glb_path, "wb") as f:
@@ -214,6 +293,7 @@ def main(argv) -> int:
         f.write(bin_out)
 
     print(f"props added: {added}, skipped: {skipped} (of {prop_count})", file=sys.stderr)
+    print(f"foliage props: {f_added} (separate mesh)", file=sys.stderr)
     print(f"wrote {glb_path}: {vertex_count} vertices, {len(indices) // 3} triangles",
           file=sys.stderr)
     return 0

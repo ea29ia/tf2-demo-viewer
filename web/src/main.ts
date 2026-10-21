@@ -42,6 +42,7 @@ const playerCount = el<HTMLSpanElement>('playerCount');
 const killfeedEl = el<HTMLUListElement>('killfeed');
 const hideDeadInput = el<HTMLInputElement>('hideDead');
 const dimPvsInput = el<HTMLInputElement>('dimPvs');
+const hideFoliageInput = el<HTMLInputElement>('hideFoliage');
 const mapNameEl = el<HTMLDivElement>('mapName');
 const hud = el<HTMLDivElement>('hud');
 const overlay = el<HTMLDivElement>('overlay');
@@ -131,6 +132,8 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.15;
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.domElement.tabIndex = 0;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 viewport.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
@@ -150,7 +153,11 @@ scene.add(hemi);
 
 const sun = new THREE.DirectionalLight(0xfff0d2, 2.6);
 sun.position.set(4200, 7000, 3400);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+sun.shadow.bias = -0.0005;
 scene.add(sun);
+scene.add(sun.target);
 
 const fill = new THREE.DirectionalLight(0x6f9cd6, 0.85);
 fill.position.set(-5000, 2600, -4200);
@@ -366,6 +373,7 @@ function createPlayerView(entity: number, name: string, team: number): PlayerVie
   const geometry = new THREE.CapsuleGeometry(CAPSULE_RADIUS, CAPSULE_LENGTH, 8, 18);
   const capsule = new THREE.Mesh(geometry, material);
   capsule.position.y = CAPSULE_CENTER_Y;
+  capsule.castShadow = true;
   group.add(capsule);
 
   // View direction arrow: a thin cone in front of the capsule.
@@ -568,6 +576,7 @@ function projViewFor(entity: number): ProjView {
   });
   const mesh = new THREE.Mesh(projGeometry(7), material);
   mesh.visible = false;
+  mesh.castShadow = true;
   projGroup.add(mesh);
   const view: ProjView = {
     mesh,
@@ -1358,6 +1367,8 @@ function setLoadState(state: 'ok' | 'err' | 'idle'): void {
   loadDot.classList.toggle('err', state === 'err');
 }
 
+let foliageMeshes: THREE.Mesh[] = [];
+
 async function loadMap(): Promise<void> {
   const loader = new GLTFLoader();
   const gltf = await loader.loadAsync(MAP_URL);
@@ -1373,19 +1384,49 @@ async function loadMap(): Promise<void> {
       color: hasColor ? 0xffffff : 0x8d9aab,
       roughness: 0.92,
       metalness: 0.02,
+      flatShading: true,
       side: THREE.DoubleSide,
     });
+    obj.castShadow = true;
+    obj.receiveShadow = true;
     obj.frustumCulled = true;
   });
 
   scene.add(gltf.scene);
   mapMeshes.length = 0;
+  foliageMeshes = [];
   gltf.scene.traverse((obj) => {
-    if (obj instanceof THREE.Mesh) mapMeshes.push(obj);
+    if (!(obj instanceof THREE.Mesh)) return;
+    if (obj.name.toLowerCase().includes('foliage')) {
+      foliageMeshes.push(obj);
+      // Hidden by default; the checkbox (checked) drives visibility.
+      obj.visible = !hideFoliageInput.checked;
+    } else {
+      mapMeshes.push(obj);
+    }
   });
   gltf.scene.updateMatrixWorld(true);
   mapBounds = new THREE.Box3().setFromObject(gltf.scene);
   fallbackGrid.visible = false;
+
+  // Aim the shadow-casting sun at the map and cover its full bounds with the
+  // shadow camera (world is Y-up after the -PI/2 rotation).
+  if (mapBounds && !mapBounds.isEmpty()) {
+    const center = mapBounds.getCenter(new THREE.Vector3());
+    const size = mapBounds.getSize(new THREE.Vector3());
+    const halfExtent = Math.max(size.x, size.y, size.z) * 0.62 + 400;
+    sun.position.copy(center).add(new THREE.Vector3(4200, 7000, 3400));
+    sun.target.position.copy(center);
+    const cam = sun.shadow.camera;
+    cam.left = -halfExtent;
+    cam.right = halfExtent;
+    cam.top = halfExtent;
+    cam.bottom = -halfExtent;
+    cam.near = 100;
+    cam.far = 30000;
+    cam.updateProjectionMatrix();
+  }
+
   resetFreeCamera();
 }
 
@@ -1477,6 +1518,10 @@ hideDeadInput.addEventListener('change', () => {
 dimPvsInput.addEventListener('change', () => {
   dimPvs = dimPvsInput.checked;
   applyReplayPoses();
+});
+
+hideFoliageInput.addEventListener('change', () => {
+  for (const mesh of foliageMeshes) mesh.visible = !hideFoliageInput.checked;
 });
 
 reloadBtn.addEventListener('click', () => window.location.reload());
