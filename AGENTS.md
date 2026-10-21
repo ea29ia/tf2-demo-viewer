@@ -23,7 +23,9 @@ viewer/
   web/               Vite + TypeScript + three.js viewer
     src/main.ts      scene, cameras, playback, FX
     src/replay.ts    replay.bin parser (the ONLY place that knows the binary layout)
+    src/playerModels.ts  player glb loading (DRACO), per-instance material clones
     src/i18n.ts      RU/EN strings, t()/setLang()/applyLang()
+  web/modeltest.html standalone model-loading test scene (/modeltest.html)
 ```
 
 ## Hard rules
@@ -69,6 +71,14 @@ python3 preprocess/validate.py web/public/replay/replay.bin web/public/replay/me
 
 Dev server: `cd web && npm run dev` (port 5173). `npm run build` output goes to
 `web/dist/` and includes public assets.
+
+## Agent coordination
+
+Before starting a task, read `docs/agent-notes/STATUS.md` and any note in
+`docs/agent-notes/` tagged with your task area (see its README.md for the note
+format and rules). After finishing work, update `STATUS.md` in the same commit
+and append to `docs/agent-notes/decisions.md` for any non-obvious decision.
+Write in English (project-wide rule).
 
 ## Conventions
 
