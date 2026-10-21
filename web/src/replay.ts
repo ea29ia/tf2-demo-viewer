@@ -21,6 +21,8 @@
  *       pitch    f32    degrees
  */
 
+import { t } from './i18n';
+
 export const RECORD_SIZE = 26;
 export const PROJ_RECORD_SIZE = 17;
 export const HURT_RECORD_SIZE = 15;
@@ -122,34 +124,33 @@ export function parseReplay(buffer: ArrayBuffer): Replay {
   let offset = 0;
 
   if (total < 16) {
-    throw new Error(`replay.bin слишком короткий: ${total} байт (минимум 16)`);
+    throw new Error(t('errShortBin', { n: total }));
   }
 
   const magic = readMagic(view, offset);
   offset += 4;
   if (magic !== MAGIC) {
-    throw new Error(`Неверная сигнатура replay.bin: "${magic}" (ожидается "${MAGIC}")`);
+    throw new Error(t('errBadMagic', { got: magic, want: MAGIC }));
   }
 
   const version = view.getUint32(offset, true);
   offset += 4;
   if (version !== VERSION) {
-    throw new Error(`Неподдерживаемая версия replay.bin: ${version} (ожидается ${VERSION})`);
+    throw new Error(t('errBadVersion', { got: version, want: VERSION }));
   }
 
   const metaLen = view.getUint32(offset, true);
   offset += 4;
   if (metaLen > total - offset) {
     throw new Error(
-      `Повреждён replay.bin: meta_len=${metaLen} выходит за границу файла (осталось ${total - offset} байт)`,
+      t('errMetaOverrun', { n: metaLen, left: total - offset }),
     );
   }
-
   let metaRaw: string;
   try {
     metaRaw = decoder.decode(new Uint8Array(buffer, offset, metaLen));
   } catch {
-    throw new Error('Не удалось декодировать meta JSON из replay.bin (UTF-8)');
+    throw new Error(t('errMetaDecode'));
   }
   offset += metaLen;
 
@@ -157,28 +158,30 @@ export function parseReplay(buffer: ArrayBuffer): Replay {
   try {
     meta = JSON.parse(metaRaw) as ReplayMeta;
   } catch (err) {
-    throw new Error(`Некорректный meta JSON внутри replay.bin: ${(err as Error).message}`);
+    throw new Error(t('errMetaJson', { msg: (err as Error).message }));
   }
   if (!meta || typeof meta !== 'object') {
-    throw new Error('meta внутри replay.bin не является объектом');
+    throw new Error(t('errMetaNotObject'));
   }
   meta.users = Array.isArray(meta.users) ? meta.users : [];
   meta.kills = Array.isArray(meta.kills) ? meta.kills : [];
 
   if (offset + 4 > total) {
-    throw new Error('Повреждён replay.bin: отсутствует frame_count');
+    throw new Error(t('errNoFrameCount'));
   }
   const frameCount = view.getUint32(offset, true);
   offset += 4;
 
   if (frameCount > 10_000_000) {
-    throw new Error(`Подозрительный frame_count=${frameCount} в replay.bin`);
+    throw new Error(t('errBadFrameCount', { n: frameCount }));
   }
 
   const frames: ReplayFrame[] = new Array(frameCount);
   for (let f = 0; f < frameCount; f++) {
     if (offset + 6 > total) {
-      throw new Error(`Повреждён replay.bin: обрезан заголовок кадра #${f} (offset ${offset}/${total})`);
+      throw new Error(
+        t('errFrameHeaderTruncated', { n: f, offset, total }),
+      );
     }
     const tick = view.getUint32(offset, true);
     const count = view.getUint16(offset + 4, true);
@@ -187,7 +190,7 @@ export function parseReplay(buffer: ArrayBuffer): Replay {
     const bytes = count * RECORD_SIZE;
     if (offset + bytes > total) {
       throw new Error(
-        `Повреждён replay.bin: кадр #${f} (tick ${tick}) требует ${bytes} байт, осталось ${total - offset}`,
+        t('errFrameDataTruncated', { n: f, tick, need: bytes, left: total - offset }),
       );
     }
 
@@ -212,14 +215,14 @@ export function parseReplay(buffer: ArrayBuffer): Replay {
     let projectiles: ProjectileRecord[] = [];
     if (version >= 2) {
       if (offset + 2 > total) {
-        throw new Error(`Повреждён replay.bin: обрезан блок снарядов кадра #${f}`);
+        throw new Error(t('errProjBlockTruncated', { n: f }));
       }
       const projCount = view.getUint16(offset, true);
       offset += 2;
       const pbytes = projCount * PROJ_RECORD_SIZE;
       if (offset + pbytes > total) {
         throw new Error(
-          `Повреждён replay.bin: снаряды кадра #${f} требуют ${pbytes} байт, осталось ${total - offset}`,
+          t('errProjDataTruncated', { n: f, need: pbytes, left: total - offset }),
         );
       }
       projectiles = new Array(projCount);
@@ -245,14 +248,14 @@ export function parseReplay(buffer: ArrayBuffer): Replay {
     let hurts: HurtRecord[] = [];
     if (version >= 2) {
       if (offset + 2 > total) {
-        throw new Error(`Повреждён replay.bin: обрезан блок урона кадра #${f}`);
+        throw new Error(t('errHurtBlockTruncated', { n: f }));
       }
       const hurtCount = view.getUint16(offset, true);
       offset += 2;
       const hbytes = hurtCount * HURT_RECORD_SIZE;
       if (offset + hbytes > total) {
         throw new Error(
-          `Повреждён replay.bin: урон кадра #${f} требует ${hbytes} байт, осталось ${total - offset}`,
+          t('errHurtDataTruncated', { n: f, need: hbytes, left: total - offset }),
         );
       }
       hurts = new Array(hurtCount);

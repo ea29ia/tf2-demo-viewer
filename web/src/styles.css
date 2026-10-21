@@ -91,6 +91,38 @@ html, body, #app {
 .load-dot.ok { background: #4fd67e; box-shadow: 0 0 0 4px rgba(79, 214, 126, 0.15); }
 .load-dot.err { background: var(--red); box-shadow: 0 0 0 4px rgba(224, 90, 83, 0.15); }
 
+.lang-toggle {
+  margin-left: auto;
+  display: flex;
+  gap: 2px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 2px;
+  background: rgba(255, 255, 255, 0.03);
+  flex-shrink: 0;
+}
+
+.lang-toggle button {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: 600 10px/1 Inter, Arial, sans-serif;
+  letter-spacing: 0.4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.lang-toggle button:hover { color: var(--fg, #e6edf3); }
+
+.lang-toggle button.active {
+  background: rgba(255, 255, 255, 0.10);
+  color: #fff;
+}
+
+.load-dot { margin-left: 6px; }
+
 .card {
   background: var(--panel);
   border: 1px solid var(--line);

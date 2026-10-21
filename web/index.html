@@ -19,7 +19,7 @@
           class="sheet-handle"
           type="button"
           aria-expanded="false"
-          aria-label="Развернуть панель"
+          data-i18n-aria="sheetAria"
         >
           <span class="sheet-grip"></span>
         </button>
@@ -29,7 +29,11 @@
             <h1>Demo Viewer</h1>
             <div id="mapName" class="brand-sub">pl_upward</div>
           </div>
-          <div id="loadDot" class="load-dot" title="Состояние загрузки"></div>
+          <div id="langToggle" class="lang-toggle">
+            <button type="button" data-lang="ru">RU</button>
+            <button type="button" data-lang="en">EN</button>
+          </div>
+          <div id="loadDot" class="load-dot" data-i18n-title="loadDotTitle"></div>
         </header>
 
         <section class="card playback">
@@ -40,14 +44,14 @@
           <input id="timeline" class="timeline" type="range" min="0" max="1000" step="0.01" value="0" />
           <div class="btn-row">
             <button id="playBtn" class="icon-btn" title="Play / Pause (Space)" aria-label="Play">▶</button>
-            <select id="speed" class="select" title="Скорость воспроизведения">
+            <select id="speed" class="select" data-i18n-title="speedTitle">
               <option value="0.25">0.25×</option>
               <option value="0.5">0.5×</option>
               <option value="1" selected>1×</option>
               <option value="2">2×</option>
               <option value="4">4×</option>
             </select>
-            <button id="freeBtn" class="pill-btn" title="Сбросить свободную камеру (Esc)">Free</button>
+            <button id="freeBtn" class="pill-btn" data-i18n-title="freeBtnTitle">Free</button>
           </div>
           <div class="mode-row">
             <button class="mode-btn" data-mode="free">Free</button>
@@ -55,35 +59,35 @@
             <button class="mode-btn" data-mode="pov">POV</button>
           </div>
           <div id="aliveStats" class="alive-stats">
-            <span class="alive-stat red"><b id="aliveRed">0</b> красных</span>
-            <span class="alive-stat blue"><b id="aliveBlue">0</b> синих</span>
-            <span class="alive-stat muted" id="deadCount">0 мёртвых</span>
+            <span class="alive-stat red"><b id="aliveRed">0</b>&nbsp;<span data-i18n="statRedWord">красных</span></span>
+            <span class="alive-stat blue"><b id="aliveBlue">0</b>&nbsp;<span data-i18n="statBlueWord">синих</span></span>
+            <span class="alive-stat muted" id="deadCount">0 <span data-i18n="statDeadWord">мёртвых</span></span>
           </div>
         </section>
 
         <section class="card players-card">
           <div class="card-title">
-            <span>Игроки</span>
+            <span data-i18n="playersTitle">Игроки</span>
             <span id="playerCount" class="badge">0</span>
           </div>
           <div id="players" class="players"></div>
         </section>
 
         <section class="card killfeed-card">
-          <div class="card-title"><span>Killfeed</span><span class="muted">последние 8</span></div>
+          <div class="card-title"><span data-i18n="killfeedTitle">Killfeed</span><span class="muted" data-i18n="killfeedSub">последние 8</span></div>
           <ul id="killfeed" class="killfeed"></ul>
         </section>
 
         <section class="card toggles">
-          <label class="check"><input id="hideDead" type="checkbox" />Скрывать мёртвых</label>
-          <label class="check"><input id="dimPvs" type="checkbox" checked />Приглушать вне PVS</label>
-          <label class="check"><input id="hideFoliage" type="checkbox" checked />Скрывать кусты/траву</label>
+          <label class="check"><input id="hideDead" type="checkbox" /><span data-i18n="toggleHideDead">Скрывать мёртвых</span></label>
+          <label class="check"><input id="dimPvs" type="checkbox" checked /><span data-i18n="toggleDimPvs">Приглушать вне PVS</span></label>
+          <label class="check"><input id="hideFoliage" type="checkbox" checked /><span data-i18n="toggleHideFoliage">Скрывать кусты/траву</span></label>
         </section>
 
-        <footer class="hint hint-desktop">
+        <footer class="hint hint-desktop" data-i18n="hintDesktop">
           WASD + Q/E — полёт · ПКМ — обзор · Space — пауза · Esc — Free · F / V — follow / POV
         </footer>
-        <footer class="hint hint-touch">
+        <footer class="hint hint-touch" data-i18n="hintTouch">
           Один палец — обзор · Джойстик — движение · Правый ползунок — верх/низ · Щипок — скорость
         </footer>
       </aside>
@@ -93,7 +97,7 @@
       <div id="inspectCard" class="inspect-card hidden">
         <div class="inspect-head">
           <span id="inspectTitle">—</span>
-          <button id="inspectClose" class="inspect-close" type="button" aria-label="Закрыть">✕</button>
+          <button id="inspectClose" class="inspect-close" type="button" data-i18n-aria="inspectCloseAria">✕</button>
         </div>
         <div id="inspectLabel" class="inspect-label"></div>
         <div id="inspectMeta" class="inspect-meta"></div>
@@ -102,14 +106,14 @@
       <div id="overlay" class="overlay hidden">
         <div class="overlay-card">
           <div class="overlay-icon">⚠</div>
-          <h2>Не хватает файлов</h2>
-          <p class="overlay-lead">положи replay.bin и glb в public/...</p>
+          <h2 data-i18n="overlayTitle">Не хватает файлов</h2>
+          <p class="overlay-lead" data-i18n="overlayLead">положи replay.bin и glb в public/...</p>
           <code>public/replay/replay.bin</code>
           <code>public/maps/pl_upward.glb</code>
           <p id="overlayDetails" class="overlay-details"></p>
           <div class="overlay-actions">
-            <button id="reloadBtn" class="pill-btn">Повторить</button>
-            <button id="dismissBtn" class="ghost-btn">Закрыть</button>
+            <button id="reloadBtn" class="pill-btn" data-i18n="overlayReload">Повторить</button>
+            <button id="dismissBtn" class="ghost-btn" data-i18n="overlayClose">Закрыть</button>
           </div>
         </div>
       </div>

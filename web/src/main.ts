@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import './styles.css';
+import { applyLang, getLang, setLang, t } from './i18n';
 import {
   FLAG_ALIVE,
   FLAG_IN_PVS,
@@ -540,15 +541,19 @@ interface ProjView {
 
 const projViews = new Map<number, ProjView>();
 let projGroup: THREE.Group = projectileGroup;
-const PROJ_KIND_LABELS: Record<number, string> = {
-  0: 'Ракета',
-  1: 'Стрела',
-  2: 'Липучка',
-  3: 'Бомба',
-  4: 'Флейр',
-  5: 'Loose Cannon',
-  7: 'Снаряд',
+const PROJ_KIND_KEYS: Record<number, string> = {
+  0: 'projRocket',
+  1: 'projArrow',
+  2: 'projSticky',
+  3: 'projBomb',
+  4: 'projFlare',
+  5: 'projRocket', // Loose Cannon counts as a rocket-type projectile
+  7: 'projShell',
 };
+
+function projKindLabel(kind: number): string {
+  return t(PROJ_KIND_KEYS[kind] ?? 'projShell');
+}
 
 const projGeometries: Record<number, THREE.BufferGeometry> = {};
 function projGeometry(kind: number): THREE.BufferGeometry {
@@ -901,7 +906,7 @@ function applyReplayPoses(): void {
 function setupReplay(replay: Replay): void {
   const meta = replay.meta;
   if (replay.frames.length === 0) {
-    throw new Error('replay.bin не содержит кадров');
+    throw new Error(t('errNoFrames'));
   }
 
   const tickRate =
@@ -997,7 +1002,7 @@ function updateAliveStats(): void {
   }
   aliveRed.textContent = String(red);
   aliveBlue.textContent = String(blue);
-  deadCount.textContent = `${dead} мёртвых`;
+  deadCount.textContent = `${dead} ${t('statDeadWord')}`;
 }
 
 function setPlaying(value: boolean): void {
@@ -1064,23 +1069,19 @@ function updateModeButtons(): void {
 function updateHud(): void {
   if (performance.now() < zoomFlashUntil) {
     if (cameraMode === 'follow') {
-      hud.textContent = `Дистанция: ${Math.round(followDistance)}`;
+      hud.textContent = t('hudDistance', { n: Math.round(followDistance) });
     } else {
       const dist = Math.max(1, Math.round(camera.position.length()));
-      hud.textContent = `Zoom: ${dist} юнитов`;
+      hud.textContent = t('hudZoom', { n: dist });
     }
     return;
   }
   if (performance.now() < speedFlashUntil) {
-    hud.textContent = `Скорость камеры: ${touchSpeedMult.toFixed(1)}×`;
+    hud.textContent = t('hudSpeed', { n: touchSpeedMult.toFixed(1) });
     return;
   }
-  const labels: Record<CameraMode, string> = {
-    free: 'Free',
-    follow: 'Follow',
-    pov: 'POV',
-  };
-  let text = `Камера: ${labels[cameraMode]}`;
+  const modeLabel = cameraMode === 'free' ? 'Free' : cameraMode === 'follow' ? 'Follow' : 'POV';
+  let text = t('hudCamera', { mode: modeLabel });
   if (cameraMode !== 'free' && selectedEntity !== null) {
     const view = views.get(selectedEntity);
     text += ` · ${view?.name ?? `#${selectedEntity}`}`;
@@ -1150,11 +1151,11 @@ function renderPlayers(force = false): void {
     const meta = document.createElement('span');
     meta.className = 'p-meta';
     if (!view.seen) {
-      meta.textContent = 'нет в кадре';
+      meta.textContent = t('pNotSeen');
     } else {
       const parts = [info.name];
-      if (!view.alive) parts.push('мёртв');
-      if (!view.inPvs) parts.push('вне PVS');
+      if (!view.alive) parts.push(t('pDead'));
+      if (!view.inPvs) parts.push(t('pOutOfPvs'));
       meta.textContent = parts.join(' · ');
     }
     main.append(name, meta);
@@ -1170,7 +1171,7 @@ function renderPlayers(force = false): void {
   if (rows.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'muted';
-    empty.textContent = 'Нет игроков в кадре';
+    empty.textContent = t('playersEmpty');
     playersEl.append(empty);
   }
 }
@@ -1207,7 +1208,7 @@ function renderKillfeed(force = false): void {
   if (visible.length === 0) {
     const empty = document.createElement('li');
     empty.className = 'empty';
-    empty.textContent = 'Пока тихо…';
+    empty.textContent = t('killfeedEmpty');
     killfeedEl.append(empty);
     return;
   }
@@ -1298,7 +1299,7 @@ function updateCamera(dt: number): void {
   }
   const pose = lastPoses.get(selectedEntity) ?? posesAt(playbackTick).get(selectedEntity);
   if (!pose) {
-    hud.textContent = `Игрок #${selectedEntity} вне кадра на этом тике`;
+    hud.textContent = t('hudOutOfFrame', { n: selectedEntity });
     return;
   }
   if (!Number.isFinite(pose.x + pose.y + pose.z)) return;
@@ -1445,7 +1446,7 @@ async function loadReplay(): Promise<void> {
   }
   const contentType = response.headers.get('content-type') ?? '';
   if (contentType.includes('text/html')) {
-    throw new Error(`${REPLAY_URL}: файл не найден (сервер вернул HTML)`);
+    throw new Error(t('errFileNotFound', { url: REPLAY_URL }));
   }
   const buffer = await response.arrayBuffer();
   const replay = parseReplay(buffer);
@@ -1453,19 +1454,21 @@ async function loadReplay(): Promise<void> {
 }
 
 async function boot(): Promise<void> {
+  applyLang(); // sets initial language on static DOM before anything renders
   resetFreeCamera();
   updateModeButtons();
   setPlaying(false);
   hideAllViews();
+  updateHud();
 
   const [mapResult, replayResult] = await Promise.allSettled([loadMap(), loadReplay()]);
   const errors: string[] = [];
 
   if (mapResult.status === 'rejected') {
-    errors.push(`Карта: ${(mapResult.reason as Error).message}`);
+    errors.push(t('errMap', { msg: (mapResult.reason as Error).message }));
   }
   if (replayResult.status === 'rejected') {
-    errors.push(`Реплей: ${(replayResult.reason as Error).message}`);
+    errors.push(t('errReplay', { msg: (replayResult.reason as Error).message }));
   }
 
   if (errors.length > 0) {
@@ -1492,18 +1495,18 @@ let propEntries: PropEntry[] = [];
 
 function propLabel(name: string): string {
   if (name.startsWith('kit:')) {
-    return name.toLowerCase().includes('health') ? 'Аптечка' : 'Патроны';
+    return name.toLowerCase().includes('health') ? t('propHealthkit') : t('propAmmo');
   }
   const n = name.toLowerCase();
-  if (n.includes('track')) return 'рельсы вагонетки';
-  if (n.includes('handrail')) return 'перила';
-  if (n.includes('boulder') || n.includes('rock')) return 'камень';
-  if (n.includes('oildrum') || n.includes('barrel') || n.includes('drum')) return 'бочка';
-  if (n.includes('crate')) return 'ящик';
-  if (n.includes('fence')) return 'забор';
-  if (n.includes('shrub') || n.includes('bush') || n.includes('grass')) return 'куст';
-  if (n.includes('light') || n.includes('lamp')) return 'свет';
-  if (n.includes('tree')) return 'дерево';
+  if (n.includes('track')) return t('propTrack');
+  if (n.includes('handrail')) return t('propHandrail');
+  if (n.includes('boulder') || n.includes('rock')) return t('propRock');
+  if (n.includes('oildrum') || n.includes('barrel') || n.includes('drum')) return t('propBarrel');
+  if (n.includes('crate')) return t('propCrate');
+  if (n.includes('fence')) return t('propFence');
+  if (n.includes('shrub') || n.includes('bush') || n.includes('grass')) return t('propShrub');
+  if (n.includes('light') || n.includes('lamp')) return t('propLight');
+  if (n.includes('tree')) return t('propTree');
   return '';
 }
 
@@ -1542,12 +1545,12 @@ function hideInspect(): void {
 function showInspect(entry: PropEntry): void {
   const slash = entry.name.lastIndexOf('/');
   inspectTitle.textContent = slash >= 0 ? entry.name.slice(slash + 1) : entry.name;
-  inspectLabel.textContent = entry.label || 'проп';
+  inspectLabel.textContent = propLabel(entry.name) || t('propDefault');
   // Scene coords back to Source units for display.
   const sx = Math.round(entry.pos.x);
   const sy = Math.round(-entry.pos.z);
   const sz = Math.round(entry.pos.y);
-  inspectMeta.textContent = `позиция: ${sx}, ${sy}, ${sz}`;
+  inspectMeta.textContent = t('inspectPos', { x: sx, y: sy, z: sz });
   inspectCard.classList.remove('hidden');
 }
 
@@ -1963,6 +1966,29 @@ function setupBottomSheet(): void {
 
 setupTouchControls();
 setupBottomSheet();
+
+// ---------------------------------------------------------------------------
+// Language switcher (RU | EN)
+// ---------------------------------------------------------------------------
+
+function refreshLocalizedUi(): void {
+  // Static DOM strings are updated by applyLang() inside setLang(); the
+  // dynamic ones are re-rendered here (dynamic strings also refresh on the
+  // next tick naturally).
+  updateAliveStats();
+  updateHud();
+  renderPlayers(true);
+  renderKillfeed(true);
+}
+
+for (const btn of document.querySelectorAll<HTMLButtonElement>('#langToggle [data-lang]')) {
+  btn.addEventListener('click', () => {
+    const lang = btn.dataset.lang === 'ru' ? 'ru' : 'en';
+    if (lang === getLang()) return;
+    setLang(lang);
+    refreshLocalizedUi();
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Animation loop
