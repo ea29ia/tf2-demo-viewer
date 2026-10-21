@@ -1,0 +1,223 @@
+#!/usr/bin/env python3
+"""Add static props (sprp game lump) as simple coloured boxes to a map GLB.
+
+Reads the existing web/public/maps/pl_upward.glb (single primitive built by
+bsp2glb.py), parses the BSP's static-prop game lump, appends one rotated box
+per prop to the same primitive's buffers and rewrites the GLB in place.
+
+Usage: python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
+"""
+from __future__ import annotations
+
+import importlib.util
+import json
+import math
+import struct
+import sys
+from array import array
+
+spec = importlib.util.spec_from_file_location("probe", "tools/probe_props.py")
+probe = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(probe)
+
+WORLD = (-12000.0, 12000.0, -12000.0, 12000.0, -2500.0, 3500.0)
+# (size_x, size_y, height) per keyword, matched against the model name.
+SIZES = [
+    (("ladder",), (8, 32, 96)),
+    (("fence", "rail", "handrail"), (256, 8, 48)),
+    (("tree", "foliage", "shrub", "bush", "grass"), (64, 64, 128)),
+    (("rock", "boulder", "stone", "cliff"), (128, 96, 96)),
+    (("stair", "step",), (128, 64, 32)),
+    (("crate", "box", "barrel", "drum", "oildrum"), (32, 32, 48)),
+    (("track", "railroad", "beam", "pipe"), (256, 16, 24)),
+    (("lamp", "light",), (16, 16, 48)),
+]
+DEFAULT_SIZE = (64, 64, 64)
+
+
+def color_for(name: str):
+    n = name.lower()
+    if any(k in n for k in ("rock", "boulder", "stone", "cliff")):
+        return (0.32, 0.31, 0.30)  # dark gray
+    if any(k in n for k in ("wood", "crate", "fence", "plank", "log")):
+        return (0.46, 0.29, 0.14)  # brown
+    if any(k in n for k in ("metal", "rail", "handrail", "track", "pipe", "ladder",
+                            "steel", "iron")):
+        return (0.55, 0.57, 0.60)  # metal gray
+    if any(k in n for k in ("grass", "foliage", "shrub", "tree", "bush")):
+        return (0.34, 0.49, 0.22)  # green
+    return (0.50, 0.50, 0.50)  # default mid gray
+
+
+def size_for(name: str):
+    n = name.lower()
+    for keys, size in SIZES:
+        if any(k in n for k in keys):
+            return size
+    return DEFAULT_SIZE
+
+
+def load_glb(path: str):
+    with open(path, "rb") as f:
+        data = f.read()
+    magic, version, total = struct.unpack_from("<4sII", data, 0)
+    if magic != b"glTF" or version != 2 or total != len(data):
+        raise SystemExit(f"{path}: not a valid GLB")
+    json_blob = None
+    bin_blob = None
+    pos = 12
+    while pos < len(data):
+        length, kind = struct.unpack_from("<II", data, pos)
+        pos += 8
+        chunk = data[pos:pos + length]
+        pos += length
+        if kind == 0x4E4F534A:
+            json_blob = chunk
+        elif kind == 0x004E4942:
+            bin_blob = chunk
+    return json.loads(json_blob.decode("utf-8")), bin_blob
+
+
+def read_f32(gltf, bin_blob, accessor_index) -> array:
+    acc = gltf["accessors"][accessor_index]
+    view = gltf["bufferViews"][acc["bufferView"]]
+    off = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+    a = array("f")
+    a.frombytes(bin_blob[off:off + acc["count"] * 12])
+    return a
+
+
+def read_u32(gltf, bin_blob, accessor_index) -> array:
+    acc = gltf["accessors"][accessor_index]
+    view = gltf["bufferViews"][acc["bufferView"]]
+    off = view.get("byteOffset", 0) + acc.get("byteOffset", 0)
+    a = array("I")
+    a.frombytes(bin_blob[off:off + acc["count"] * 4])
+    return a
+
+
+def pad4(data: bytes, fill: bytes = b"\0") -> bytes:
+    return data + fill * ((4 - len(data) % 4) % 4)
+
+
+def main(argv) -> int:
+    if len(argv) != 3:
+        print(f"usage: {argv[0]} <input.bsp> <map.glb>", file=sys.stderr)
+        return 2
+    bsp_path, glb_path = argv[1], argv[2]
+
+    bsp = probe.m.Bsp(bsp_path)
+    data, _version = probe.decompress_sprp(bsp)
+    names, _leaf_count, prop_count, entry = probe.parse(data)
+
+    gltf, bin_blob = load_glb(glb_path)
+    prim = gltf["meshes"][0]["primitives"][0]
+    positions = read_f32(gltf, bin_blob, prim["attributes"]["POSITION"])
+    normals = read_f32(gltf, bin_blob, prim["attributes"]["NORMAL"])
+    colors = read_f32(gltf, bin_blob, prim["attributes"]["COLOR_0"])
+    indices = read_u32(gltf, bin_blob, prim["indices"])
+    vertex_count = len(positions) // 3
+
+    added = 0
+    skipped = 0
+    for i in range(prop_count):
+        base = entry + i * probe.PROP_STRIDE
+        ox, oy, oz = struct.unpack_from("<3f", data, base)
+        pitch, yaw, _roll = struct.unpack_from("<3f", data, base + 12)
+        pt = struct.unpack_from("<H", data, base + 24)[0]
+        name = names[pt] if pt < len(names) else ""
+        if pt >= len(names) or not all(
+                math.isfinite(v) for v in (ox, oy, oz, pitch, yaw)):
+            skipped += 1
+            continue
+        # Skip props that would blow up the bounding box (3D skybox props).
+        if not (WORLD[0] <= ox <= WORLD[1] and WORLD[2] <= oy <= WORLD[3]
+                and WORLD[4] <= oz <= WORLD[5]):
+            skipped += 1
+            continue
+        sx, sy, h = size_for(name)
+        color = color_for(name)
+        top = min(oz + h, WORLD[5])
+        half = (sx / 2.0, sy / 2.0)
+        # Rotate the four horizontal corners by yaw (radians, Source: CCW seen
+        # from above in the XY plane).
+        c, s = math.cos(yaw), math.sin(yaw)
+        corners = []
+        for dx, dy in ((-half[0], -half[1]), (half[0], -half[1]),
+                       (half[0], half[1]), (-half[0], half[1])):
+            corners.append((ox + dx * c - dy * s, oy + dx * s + dy * c))
+
+        face_normals = (
+            (0, 0, 1), (0, 0, -1),
+            (0, 1, 0), (0, -1, 0),
+            (1, 0, 0), (-1, 0, 0),
+        )
+        # Bottom corners (0-3) then top corners (4-7).
+        verts = [(x, y, oz) for x, y in corners] + [(x, y, top) for x, y in corners]
+        faces = [
+            (4, 5, 6, 7),    # top
+            (0, 3, 2, 1),    # bottom
+            (2, 3, 7, 6),    # +y
+            (0, 1, 5, 4),    # -y
+            (1, 2, 6, 5),    # +x
+            (3, 0, 4, 7),    # -x
+        ]
+        vbase = vertex_count
+        for v in verts:
+            positions.extend(v)
+            normals.extend((0.0, 0.0, 0.0))  # filled per-face below
+            colors.extend(color)
+        for fidx, (a, b, cc, d) in enumerate(faces):
+            n = face_normals[fidx]
+            for vi in (a, b, cc, d):
+                k = (vbase + vi) * 3
+                normals[k:k + 3] = array("f", n)
+            indices.extend((vbase + a, vbase + b, vbase + cc))
+            indices.extend((vbase + a, vbase + cc, vbase + d))
+        vertex_count += 8
+        added += 1
+
+    # Rewrite the GLB with extended buffers (single primitive preserved).
+    pos_bytes = pad4(positions.tobytes())
+    nrm_bytes = pad4(normals.tobytes())
+    col_bytes = pad4(colors.tobytes())
+    idx_bytes = pad4(indices.tobytes())
+    bin_out = b"".join((pos_bytes, nrm_bytes, col_bytes, idx_bytes))
+
+    mesh_min = [min(positions[i] for i in range(k, len(positions), 3)) for k in range(3)]
+    mesh_max = [max(positions[i] for i in range(k, len(positions), 3)) for k in range(3)]
+
+    gltf["buffers"] = [{"byteLength": len(bin_out)}]
+    gltf["bufferViews"] = [
+        {"buffer": 0, "byteOffset": 0, "byteLength": len(pos_bytes), "target": 34962},
+        {"buffer": 0, "byteOffset": len(pos_bytes), "byteLength": len(nrm_bytes), "target": 34962},
+        {"buffer": 0, "byteOffset": len(pos_bytes) + len(nrm_bytes),
+         "byteLength": len(col_bytes), "target": 34962},
+        {"buffer": 0, "byteOffset": len(pos_bytes) + len(nrm_bytes) + len(col_bytes),
+         "byteLength": len(idx_bytes), "target": 34963},
+    ]
+    acc = gltf["accessors"]
+    acc[0]["count"] = vertex_count
+    acc[0]["min"] = mesh_min
+    acc[0]["max"] = mesh_max
+    acc[1]["count"] = vertex_count
+    acc[2]["count"] = vertex_count
+    acc[3]["count"] = len(indices)
+
+    json_blob = pad4(json.dumps(gltf, separators=(",", ":")).encode("utf-8"), b" ")
+    total = 12 + 8 + len(json_blob) + 8 + len(bin_out)
+    with open(glb_path, "wb") as f:
+        f.write(struct.pack("<4sII", b"glTF", 2, total))
+        f.write(struct.pack("<II", len(json_blob), 0x4E4F534A))
+        f.write(json_blob)
+        f.write(struct.pack("<II", len(bin_out), 0x004E4942))
+        f.write(bin_out)
+
+    print(f"props added: {added}, skipped: {skipped} (of {prop_count})", file=sys.stderr)
+    print(f"wrote {glb_path}: {vertex_count} vertices, {len(indices) // 3} triangles",
+          file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv))
