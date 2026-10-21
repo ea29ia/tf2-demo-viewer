@@ -1,0 +1,7 @@
+preprocess/target/
+web/node_modules/
+web/dist/
+assets/*.bsp
+web/public/maps/*.glb
+web/public/replay/*.bin
+*.log
