@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#0b0f14" />
+    <title>TF2 Demo Viewer — pl_upward</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="viewport"></div>
+
+      <aside id="sidebar">
+        <header class="brand">
+          <div class="brand-mark">TF2</div>
+          <div>
+            <h1>Demo Viewer</h1>
+            <div id="mapName" class="brand-sub">pl_upward</div>
+          </div>
+          <div id="loadDot" class="load-dot" title="Состояние загрузки"></div>
+        </header>
+
+        <section class="card playback">
+          <div class="time-row">
+            <span id="timeNow">0:00.0</span>
+            <span id="timeTotal">0:00.0</span>
+          </div>
+          <input id="timeline" class="timeline" type="range" min="0" max="1000" step="0.01" value="0" />
+          <div class="btn-row">
+            <button id="playBtn" class="icon-btn" title="Play / Pause (Space)" aria-label="Play">▶</button>
+            <select id="speed" class="select" title="Скорость воспроизведения">
+              <option value="0.25">0.25×</option>
+              <option value="0.5">0.5×</option>
+              <option value="1" selected>1×</option>
+              <option value="2">2×</option>
+              <option value="4">4×</option>
+            </select>
+            <button id="freeBtn" class="pill-btn" title="Сбросить свободную камеру (Esc)">Free</button>
+          </div>
+          <div class="mode-row">
+            <button class="mode-btn" data-mode="free">Free</button>
+            <button class="mode-btn" data-mode="follow">Follow</button>
+            <button class="mode-btn" data-mode="pov">POV</button>
+          </div>
+        </section>
+
+        <section class="card players-card">
+          <div class="card-title">
+            <span>Игроки</span>
+            <span id="playerCount" class="badge">0</span>
+          </div>
+          <div id="players" class="players"></div>
+        </section>
+
+        <section class="card killfeed-card">
+          <div class="card-title"><span>Killfeed</span><span class="muted">последние 8</span></div>
+          <ul id="killfeed" class="killfeed"></ul>
+        </section>
+
+        <section class="card toggles">
+          <label class="check"><input id="hideDead" type="checkbox" />Скрывать мёртвых</label>
+          <label class="check"><input id="dimPvs" type="checkbox" checked />Приглушать вне PVS</label>
+        </section>
+
+        <footer class="hint">
+          WASD + Q/E — полёт · ПКМ — обзор · Space — пауза · Esc — Free · F / V — follow / POV
+        </footer>
+      </aside>
+
+      <div id="hud" class="hud">Камера: Free</div>
+
+      <div id="overlay" class="overlay hidden">
+        <div class="overlay-card">
+          <div class="overlay-icon">⚠</div>
+          <h2>Не хватает файлов</h2>
+          <p class="overlay-lead">положи replay.bin и glb в public/...</p>
+          <code>public/replay/replay.bin</code>
+          <code>public/maps/pl_upward.glb</code>
+          <p id="overlayDetails" class="overlay-details"></p>
+          <div class="overlay-actions">
+            <button id="reloadBtn" class="pill-btn">Повторить</button>
+            <button id="dismissBtn" class="ghost-btn">Закрыть</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

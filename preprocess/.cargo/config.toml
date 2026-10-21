@@ -1,0 +1,3 @@
+[target.aarch64-linux-android]
+linker = "clang"
+rustflags = ["-C", "link-arg=-L/system/lib64"]

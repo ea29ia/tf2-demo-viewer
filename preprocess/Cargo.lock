@@ -52,6 +52,7 @@ checksum = "32b13ea120a812beba79e34316b3942a857c86ec1593cb34f27bb28272ce2cca"
 name = "dem2replay"
 version = "0.1.0"
 dependencies = [
+ "serde_json",
  "tf-demo-parser",
 ]
 
