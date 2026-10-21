@@ -603,6 +603,11 @@ function updateModeButtons(): void {
 }
 
 function updateHud(): void {
+  if (performance.now() < zoomFlashUntil) {
+    const dist = Math.max(1, Math.round(camera.position.length()));
+    hud.textContent = `Zoom: ${dist} юнитов`;
+    return;
+  }
   if (performance.now() < speedFlashUntil) {
     hud.textContent = `Скорость камеры: ${touchSpeedMult.toFixed(1)}×`;
     return;
@@ -1027,9 +1032,13 @@ window.addEventListener('pointermove', (event) => {
       const pts = [...activePointers.values()];
       const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
       if (pinchPrevDist > 0 && dist > 0) {
-        touchSpeedMult = clamp((touchSpeedMult * dist) / pinchPrevDist, 0.4, 3);
-        speedFlashUntil = performance.now() + 1200;
-        updateHud();
+        // Two-finger pinch now zooms the camera (dolly along view dir).
+        const factor = pinchPrevDist / dist; // spread out = move forward
+        if (cameraMode === 'free') dollyFreeCamera(factor);
+        else {
+          touchSpeedMult = clamp((touchSpeedMult * dist) / pinchPrevDist, 0.4, 3);
+          speedFlashUntil = performance.now() + 1200;
+        }
       }
       pinchPrevDist = dist;
       return;
@@ -1044,6 +1053,32 @@ window.addEventListener('pointermove', (event) => {
   freeYaw -= dx * 0.0026;
   freePitch = clamp(freePitch - dy * 0.0026, -1.5, 1.5);
 });
+
+// Pinch zoom: two-finger spread/pinch dollies the free camera along its view
+// direction ("normally zoom in with gestures"). Multiplier from the ratio is
+// smoothed so it doesn't jump.
+let zoomFlashUntil = 0;
+const ZOOM_MIN = 40;     // units — don't clip into walls
+const ZOOM_MAX = 16000;  // units — far overview
+
+renderer.domElement.addEventListener('wheel', (event) => {
+  if (cameraMode !== 'free') return;
+  const factor = Math.exp(event.deltaY * 0.0012);
+  dollyFreeCamera(factor);
+}, { passive: true });
+
+function dollyFreeCamera(factor: number): void {
+  const dir = tmpVec.set(-Math.sin(freeYaw), 0, -Math.cos(freeYaw));
+  dir.y = Math.sin(freePitch);
+  dir.normalize();
+  const next = camera.position.clone().addScaledVector(dir, -factor);
+  const dist = next.distanceTo(camera.position);
+  if (dist > ZOOM_MAX * 0.5) return; // absurd jump guard
+  camera.position.copy(next);
+  camera.position.y = clamp(camera.position.y, ZOOM_MIN, ZOOM_MAX);
+  zoomFlashUntil = performance.now() + 900;
+  updateHud();
+}
 
 function endPointer(event: PointerEvent): void {
   activePointers.delete(event.pointerId);
