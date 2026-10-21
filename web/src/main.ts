@@ -1415,6 +1415,7 @@ async function loadMap(): Promise<void> {
   fallbackGrid.visible = false;
 
   collectPropEntries(gltf.scene);
+  console.log('[inspect] prop entries loaded:', propEntries.length);
 
   // Aim the shadow-casting sun at the map and cover its full bounds with the
   // shadow camera (world is Y-up after the -PI/2 rotation).
@@ -1560,18 +1561,28 @@ function inspectAt(clientX: number, clientY: number): void {
   raycaster.far = Infinity; // camera-collision code sets .far; reset it here
   const targets = [...mapMeshes, ...foliageMeshes.filter((m) => m.visible)];
   const hits = raycaster.intersectObjects(targets, false);
-  if (hits.length === 0) {
-    hideInspect();
-    return;
-  }
-  const point = hits[0].point;
   let best: PropEntry | null = null;
   let bestDist = Infinity;
-  for (const entry of propEntries) {
-    const d = entry.pos.distanceTo(point);
-    if (d < entry.tol && d < bestDist) {
-      bestDist = d;
-      best = entry;
+  if (hits.length > 0) {
+    const point = hits[0].point;
+    for (const entry of propEntries) {
+      const d = entry.pos.distanceTo(point);
+      if (d < entry.tol && d < bestDist) {
+        bestDist = d;
+        best = entry;
+      }
+    }
+  }
+  if (!best && propEntries.length > 0) {
+    // Fallback: nearest object to the click RAY (helps when the click lands on
+    // terrain next to a prop, or the geometry is thin).
+    const ray = raycaster.ray;
+    for (const entry of propEntries) {
+      const d = ray.distanceToPoint(entry.pos);
+      if (d < entry.tol && d < bestDist) {
+        bestDist = d;
+        best = entry;
+      }
     }
   }
   if (best) showInspect(best);
