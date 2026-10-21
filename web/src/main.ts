@@ -1557,6 +1557,7 @@ function inspectAt(clientX: number, clientY: number): void {
     -((clientY - rect.top) / rect.height) * 2 + 1,
   );
   raycaster.setFromCamera(ndc, camera);
+  raycaster.far = Infinity; // camera-collision code sets .far; reset it here
   const targets = [...mapMeshes, ...foliageMeshes.filter((m) => m.visible)];
   const hits = raycaster.intersectObjects(targets, false);
   if (hits.length === 0) {
