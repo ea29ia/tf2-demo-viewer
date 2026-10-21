@@ -60,8 +60,8 @@ const TEAM_RED = 2;
 const TEAM_BLUE = 3;
 
 const TEAM_COLOR: Record<number, number> = {
-  [TEAM_RED]: 0xd94a45,
-  [TEAM_BLUE]: 0x4a7fd6,
+  [TEAM_RED]: 0xe03c3c,
+  [TEAM_BLUE]: 0x2f7bff,
 };
 
 interface ClassInfo {
@@ -347,8 +347,8 @@ function createPlayerView(entity: number, name: string, team: number): PlayerVie
 
   const material = new THREE.MeshStandardMaterial({
     color: teamColor(team),
-    emissive: classInfo(0).color,
-    emissiveIntensity: 0.45,
+    emissive: teamColor(team),
+    emissiveIntensity: 0.5,
     roughness: 0.62,
     metalness: 0.05,
     transparent: true,
@@ -406,7 +406,7 @@ function applyPose(view: PlayerView, pose: Pose): void {
 
   const mat = view.capsule.material;
   mat.color.setHex(teamColor(pose.team));
-  mat.emissive.setHex(classInfo(pose.cls).color);
+  mat.emissive.setHex(teamColor(pose.team));
   mat.emissiveIntensity = view.alive ? 0.5 : 0.08;
 
   let opacity = 1;
@@ -469,6 +469,10 @@ interface ProjView {
   critical: boolean;
   team: number;
   used: boolean;
+  lastSeenTick: number;
+  lastX: number;
+  lastY: number;
+  lastZ: number;
 }
 
 const projViews = new Map<number, ProjView>();
@@ -515,7 +519,17 @@ function projViewFor(entity: number): ProjView {
   const mesh = new THREE.Mesh(projGeometry(7), material);
   mesh.visible = false;
   projGroup.add(mesh);
-  const view: ProjView = { mesh, kind: 7, critical: false, team: 0, used: false };
+  const view: ProjView = {
+    mesh,
+    kind: 7,
+    critical: false,
+    team: 0,
+    used: false,
+    lastSeenTick: -1,
+    lastX: 0,
+    lastY: 0,
+    lastZ: 0,
+  };
   projViews.set(entity, view);
   return view;
 }
@@ -551,8 +565,24 @@ function applyProjectiles(): void {
 
   for (const [id, view] of projViews) {
     if (!seen.has(id)) {
+      // Explosive projectile vanished: spawn a splash ring at its last position.
+      if (
+        (view.kind === 0 || view.kind === 2 || view.kind === 3 || view.kind === 5) &&
+        view.used &&
+        view.lastSeenTick >= 0 &&
+        playbackTick - view.lastSeenTick <= 2
+      ) {
+        spawnSplash(
+          view.lastX,
+          view.lastY,
+          view.lastZ,
+          view.kind === 0 ? 146 : 148,
+          playbackTick,
+        );
+      }
       view.mesh.visible = false;
       view.used = false;
+      view.lastSeenTick = -1;
     }
   }
 }
@@ -606,6 +636,10 @@ function mixProjectile(
 
   view.mesh.visible = true;
   view.used = true;
+  view.lastSeenTick = playbackTick;
+  view.lastX = x;
+  view.lastY = y;
+  view.lastZ = z;
 }
 
 function lerpN(a: number, b: number, t: number): number {
@@ -907,12 +941,23 @@ function selectPlayer(entity: number, mode: CameraMode = 'follow'): void {
 
 function setMode(mode: CameraMode): void {
   if (mode !== 'free' && selectedEntity === null) {
-    // pick the first alive player as a sensible fallback
+    // Prefer the demo recorder (meta.nick), else first alive player.
+    const nick = loaded?.meta.nick;
     let fallback: number | null = null;
-    for (const pose of lastPoses.values()) {
-      if ((pose.flags & FLAG_ALIVE) !== 0) {
-        fallback = pose.entity;
-        break;
+    if (nick) {
+      for (const [entity, name] of metaUsers) {
+        if (name === nick) {
+          fallback = entity;
+          break;
+        }
+      }
+    }
+    if (fallback === null) {
+      for (const pose of lastPoses.values()) {
+        if ((pose.flags & FLAG_ALIVE) !== 0) {
+          fallback = pose.entity;
+          break;
+        }
       }
     }
     if (fallback === null && views.size > 0) fallback = views.keys().next().value ?? null;
