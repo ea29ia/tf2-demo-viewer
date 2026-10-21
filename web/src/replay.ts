@@ -317,6 +317,9 @@ export interface Pose {
   team: number;
   cls: number;
   flags: number;
+  disguiseTeam: number; // 0 none, 2 red, 3 blue (spy disguise)
+  disguised: boolean;
+  stealthed: boolean;
   health: number;
   x: number;
   y: number;
@@ -369,6 +372,9 @@ export function samplePoses(
       team,
       cls,
       flags,
+      disguiseTeam: spyDisguiseTeam(a, target, mix),
+      disguised: (flags & FLAG_DISGUISED) !== 0,
+      stealthed: (flags & FLAG_STEALTHED) !== 0,
       health: Math.round(lerp(a.health, target.health, mix)),
       x: teleported ? target.x : lerp(a.x, target.x, mix),
       y: teleported ? target.y : lerp(a.y, target.y, mix),
@@ -387,6 +393,9 @@ export function samplePoses(
       team: b.team,
       cls: b.cls,
       flags: b.flags,
+      disguiseTeam: spyDisguiseTeam(b, b, 0),
+      disguised: (b.flags & FLAG_DISGUISED) !== 0,
+      stealthed: (b.flags & FLAG_STEALTHED) !== 0,
       health: b.health,
       x: b.x,
       y: b.y,
@@ -400,8 +409,27 @@ export function samplePoses(
   return poses;
 }
 
+/**
+ * Spy disguise team from the record itself: a disguised spy's `team` prop
+ * already reflects the *fake* team in TF2 demos (m_iTeamNum follows disguise),
+ * so we compare with the meta roster team to detect a cross-team disguise.
+ * Returns 0 when not disguised, else the fake team (2 red / 3 blue).
+ */
+function spyDisguiseTeam(
+  a: PlayerRecord,
+  target: PlayerRecord,
+  mix: number,
+): number {
+  const flagged = ((mix < 0.5 ? a.flags : target.flags) & FLAG_DISGUISED) !== 0;
+  if (!flagged) return 0;
+  const shown = mix < 0.5 ? a.team : target.team;
+  return shown === 2 || shown === 3 ? shown : 0;
+}
+
 export const FLAG_ALIVE = 1 << 0;
 export const FLAG_IN_PVS = 1 << 1;
+export const FLAG_DISGUISED = 1 << 2;
+export const FLAG_STEALTHED = 1 << 3;
 
 export function isAlive(flags: number): boolean {
   return (flags & FLAG_ALIVE) !== 0;

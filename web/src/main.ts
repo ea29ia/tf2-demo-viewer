@@ -4,6 +4,8 @@ import './styles.css';
 import {
   FLAG_ALIVE,
   FLAG_IN_PVS,
+  FLAG_DISGUISED,
+  FLAG_STEALTHED,
   findFrameIndex,
   parseReplay,
   recordMap,
@@ -47,6 +49,9 @@ const overlayDetails = el<HTMLParagraphElement>('overlayDetails');
 const reloadBtn = el<HTMLButtonElement>('reloadBtn');
 const dismissBtn = el<HTMLButtonElement>('dismissBtn');
 const loadDot = el<HTMLDivElement>('loadDot');
+const aliveRed = el<HTMLElement>('aliveRed');
+const aliveBlue = el<HTMLElement>('aliveBlue');
+const deadCount = el<HTMLElement>('deadCount');
 
 const BASE = import.meta.env.BASE_URL;
 const REPLAY_URL = `${BASE}replay/replay.bin`;
@@ -57,6 +62,7 @@ const MAP_URL = `${BASE}maps/pl_upward.glb`;
 // ---------------------------------------------------------------------------
 
 const TEAM_RED = 2;
+const CLASS_SPY = 8;
 const TEAM_BLUE = 3;
 
 const TEAM_COLOR: Record<number, number> = {
@@ -187,6 +193,7 @@ interface PlayerView {
   group: THREE.Group;
   capsule: THREE.Mesh<THREE.CapsuleGeometry, THREE.MeshStandardMaterial>;
   arrow: THREE.Mesh<THREE.ConeGeometry, THREE.MeshBasicMaterial>;
+  ring: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>;
   label: NameLabel;
 }
 
@@ -370,6 +377,16 @@ function createPlayerView(entity: number, name: string, team: number): PlayerVie
   arrow.position.set(0, CAPSULE_CENTER_Y, CAPSULE_RADIUS + 17);
   group.add(arrow);
 
+  // True-team ring at the feet (visible only for disguised spies).
+  const ring = new THREE.Mesh(
+    new THREE.TorusGeometry(CAPSULE_RADIUS + 6, 2.5, 6, 24),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.95 }),
+  );
+  ring.rotation.x = Math.PI / 2;
+  ring.position.y = 4;
+  ring.visible = false;
+  group.add(ring);
+
   const label = createNameLabel();
   label.sprite.position.y = 112;
   group.add(label.sprite);
@@ -389,6 +406,7 @@ function createPlayerView(entity: number, name: string, team: number): PlayerVie
     group,
     capsule,
     arrow,
+    ring,
     label,
   };
   views.set(entity, view);
@@ -416,15 +434,36 @@ function applyPose(view: PlayerView, pose: Pose): void {
   view.group.rotation.y = THREE.MathUtils.degToRad(pose.yaw);
 
   const mat = view.capsule.material;
-  mat.color.setHex(teamColor(pose.team));
-  mat.emissive.setHex(teamColor(pose.team));
+  const isSpy = pose.cls === CLASS_SPY;
+  const stealthed = pose.stealthed;
+  if (isSpy && pose.disguised) {
+    // Disguised spy: purple body with a ring of the *real* team color.
+    mat.color.setHex(0x9b59d0);
+    mat.emissive.setHex(0x9b59d0);
+  } else if (isSpy && stealthed) {
+    // Cloaked spy: faint translucent gray-violet.
+    mat.color.setHex(0x8a7fae);
+    mat.emissive.setHex(0x8a7fae);
+  } else {
+    mat.color.setHex(teamColor(pose.team));
+    mat.emissive.setHex(teamColor(pose.team));
+  }
   mat.emissiveIntensity = view.alive ? 0.5 : 0.08;
 
   let opacity = 1;
   if (!view.alive) opacity = 0.24;
+  if (stealthed && view.alive) opacity = Math.min(opacity, 0.45);
   if (view.inPvs === false && dimPvs) opacity = Math.min(opacity, 0.35);
   mat.opacity = opacity;
   mat.depthWrite = opacity > 0.7;
+
+  // Real-team ring: a thin torus at the feet shows the true team for disguised spies.
+  if (isSpy && pose.disguised) {
+    view.ring.visible = view.alive;
+    (view.ring.material as THREE.MeshBasicMaterial).color.setHex(teamColor(view.team));
+  } else {
+    view.ring.visible = false;
+  }
 
   if (view.alive) {
     view.capsule.rotation.z = 0;
@@ -923,8 +962,28 @@ function updateTimelineUi(): void {
     timeTotal.textContent = '0:00.0';
     return;
   }
+  const remain = (loaded.maxTick - playbackTick) / loaded.tickRate;
   timeNow.textContent = fmtTime(currentSeconds());
-  timeTotal.textContent = fmtTime((loaded.maxTick - loaded.minTick) / loaded.tickRate);
+  timeTotal.textContent = `-${fmtTime(Math.max(0, remain))}`;
+  updateAliveStats();
+}
+
+function updateAliveStats(): void {
+  if (!loaded) return;
+  let red = 0;
+  let blue = 0;
+  let dead = 0;
+  for (const pose of lastPoses.values()) {
+    if ((pose.flags & FLAG_ALIVE) !== 0) {
+      if (pose.team === TEAM_RED) red++;
+      else if (pose.team === TEAM_BLUE) blue++;
+    } else if (pose.team === TEAM_RED || pose.team === TEAM_BLUE) {
+      dead++;
+    }
+  }
+  aliveRed.textContent = String(red);
+  aliveBlue.textContent = String(blue);
+  deadCount.textContent = `${dead} мёртвых`;
 }
 
 function setPlaying(value: boolean): void {

@@ -129,6 +129,12 @@ fn snapshot(state: &GameState) -> Vec<Record> {
             if p.in_pvs {
                 flags |= 2;
             }
+            if p.has_condition(tf_demo_parser::demo::data::game_state::PlayerCondition::Disguised) {
+                flags |= 4;
+            }
+            if p.has_condition(tf_demo_parser::demo::data::game_state::PlayerCondition::Stealthed) {
+                flags |= 8;
+            }
             Record {
                 entity: u32::from(p.entity) as u16,
                 team: team_byte(p.team),
