@@ -10,6 +10,7 @@ import {
   samplePoses,
   type PlayerRecord,
   type Pose,
+  type ProjectileRecord,
   type Replay,
   type ReplayFrame,
   type ReplayKill,
@@ -156,6 +157,9 @@ scene.add(fallbackGrid);
 const playerGroup = new THREE.Group();
 scene.add(playerGroup);
 
+const projectileGroup = new THREE.Group();
+scene.add(projectileGroup);
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
@@ -192,6 +196,7 @@ interface LoadedReplay {
   minTick: number;
   maxTick: number;
   frameMaps: WeakMap<ReplayFrame, Map<number, PlayerRecord>>;
+  projMaps: WeakMap<ReplayFrame, Map<number, ProjectileRecord>>;
 }
 
 let loaded: LoadedReplay | null = null;
@@ -224,6 +229,7 @@ const isCoarse =
   typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
 let touchSpeedMult = 1; // pinch-to-zoom → camera speed multiplier (0.4x..3x)
 let followDistance = 265; // follow-mode camera distance behind the player
+let followSnap = false; // snap immediately on mode/player change instead of lerping
 let speedFlashUntil = 0; // HUD flash timestamp for the speed multiplier
 let joyForward = 0; // virtual joystick axes (-1..1), 0 on desktop
 let joySide = 0;
@@ -442,6 +448,170 @@ function getFrameMap(frame: ReplayFrame): Map<number, PlayerRecord> {
   return map;
 }
 
+function getProjMap(frame: ReplayFrame): Map<number, ProjectileRecord> {
+  if (!loaded) return new Map();
+  let map = loaded.projMaps.get(frame);
+  if (!map) {
+    map = new Map();
+    for (const p of frame.projectiles ?? []) map.set(p.entity, p);
+    loaded.projMaps.set(frame, map);
+  }
+  return map;
+}
+
+// ---------------------------------------------------------------------------
+// Projectiles
+// ---------------------------------------------------------------------------
+
+interface ProjView {
+  mesh: THREE.Mesh<THREE.BufferGeometry, THREE.MeshStandardMaterial>;
+  kind: number;
+  critical: boolean;
+  team: number;
+  used: boolean;
+}
+
+const projViews = new Map<number, ProjView>();
+let projGroup: THREE.Group = projectileGroup;
+const PROJ_KIND_LABELS: Record<number, string> = {
+  0: 'Ракета',
+  1: 'Стрела',
+  2: 'Липучка',
+  3: 'Бомба',
+  4: 'Флейр',
+  5: 'Loose Cannon',
+  7: 'Снаряд',
+};
+
+const projGeometries: Record<number, THREE.BufferGeometry> = {};
+function projGeometry(kind: number): THREE.BufferGeometry {
+  if (!projGeometries[kind]) {
+    if (kind === 0) {
+      // rocket — slim capsule oriented along velocity
+      projGeometries[kind] = new THREE.CapsuleGeometry(4.5, 22, 4, 10);
+    } else if (kind === 1) {
+      projGeometries[kind] = new THREE.CapsuleGeometry(2.2, 30, 4, 8);
+    } else if (kind === 2 || kind === 3 || kind === 5) {
+      // pipes / stickies — spheres
+      projGeometries[kind] = new THREE.SphereGeometry(6.5, 12, 10);
+    } else {
+      projGeometries[kind] = new THREE.SphereGeometry(4.5, 10, 8);
+    }
+  }
+  return projGeometries[kind];
+}
+
+function projViewFor(entity: number): ProjView {
+  const existing = projViews.get(entity);
+  if (existing) return existing;
+  const material = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    emissive: 0xffffff,
+    emissiveIntensity: 0.7,
+    roughness: 0.4,
+    transparent: true,
+    opacity: 0.95,
+  });
+  const mesh = new THREE.Mesh(projGeometry(7), material);
+  mesh.visible = false;
+  projGroup.add(mesh);
+  const view: ProjView = { mesh, kind: 7, critical: false, team: 0, used: false };
+  projViews.set(entity, view);
+  return view;
+}
+
+const tmpProjA = new THREE.Vector3();
+const tmpProjB = new THREE.Vector3();
+const tmpUp = new THREE.Vector3(0, 1, 0);
+
+function applyProjectiles(): void {
+  if (!loaded) return;
+  const frames = loaded.replay.frames;
+  if (frames.length === 0) return;
+  const i = findFrameIndex(frames, playbackTick);
+  const a = frames[i];
+  const b = frames[Math.min(i + 1, frames.length - 1)];
+  const mapA = getProjMap(a);
+  const mapB = getProjMap(b);
+  const alpha = a !== b && b.tick > a.tick
+    ? clamp((playbackTick - a.tick) / (b.tick - a.tick), 0, 1)
+    : 0;
+
+  // Merge entity sets: a projectile present in either frame is rendered.
+  const seen = new Set<number>();
+  for (const [id, pa] of mapA) {
+    seen.add(id);
+    const pb = mapB.get(id);
+    mixProjectile(id, pa, pb, pb ? alpha : 0);
+  }
+  for (const [id, pb] of mapB) {
+    if (seen.has(id)) continue;
+    mixProjectile(id, pb, pb, 0);
+  }
+
+  for (const [id, view] of projViews) {
+    if (!seen.has(id)) {
+      view.mesh.visible = false;
+      view.used = false;
+    }
+  }
+}
+
+function mixProjectile(
+  id: number,
+  a: ProjectileRecord,
+  b: ProjectileRecord | undefined,
+  t: number,
+): void {
+  const view = projViewFor(id);
+  const target = b ?? a;
+  const dx = target.x - a.x;
+  const dy = target.y - a.y;
+  const dz = target.z - a.z;
+  const teleported = b !== undefined && Math.hypot(dx, dy, dz) > 256;
+  const mix = teleported ? 1 : t;
+  const x = teleported ? target.x : lerpN(a.x, target.x, mix);
+  const y = teleported ? target.y : lerpN(a.y, target.y, mix);
+  const z = teleported ? target.z : lerpN(a.z, target.z, mix);
+
+  const kind = t < 0.5 ? a.kind : target.kind;
+  const team = t < 0.5 ? a.team : target.team;
+  const critical = t < 0.5 ? (a.flags & 1) !== 0 : (target.flags & 1) !== 0;
+
+  if (kind !== view.kind || team !== view.team || critical !== view.critical) {
+    view.kind = kind;
+    view.team = team;
+    view.critical = critical;
+    view.mesh.geometry = projGeometry(kind);
+    const col = teamColor(team);
+    view.mesh.material.color.setHex(critical ? 0xffd24a : col);
+    view.mesh.material.emissive.setHex(critical ? 0xffaa00 : col);
+    view.mesh.material.emissiveIntensity = critical ? 1.4 : 0.7;
+  }
+
+  // Source (x,y,z) Z-up -> scene (x, z, -y) Y-up
+  view.mesh.position.set(x, z, -y);
+
+  // Orient rockets/arrows along velocity if available
+  const vx = target.vx;
+  const vy = target.vy;
+  const vz = target.vz;
+  if (kind === 0 || kind === 1) {
+    const v = tmpProjA.set(vx, vz, -vy);
+    if (v.lengthSq() > 1) {
+      v.normalize();
+      view.mesh.quaternion.setFromUnitVectors(tmpUp, v);
+    }
+  }
+
+  view.mesh.visible = true;
+  view.used = true;
+}
+
+function lerpN(a: number, b: number, t: number): number {
+  return a + (b - a) * t;
+}
+
 function posesAt(tick: number): Map<number, Pose> {
   if (!loaded || loaded.replay.frames.length === 0) return new Map();
   const frames = loaded.replay.frames;
@@ -471,6 +641,7 @@ function applyReplayPoses(): void {
     if (!poses.has(view.entity)) view.group.visible = false;
   }
 
+  applyProjectiles();
   updateHud();
 }
 
@@ -501,6 +672,7 @@ function setupReplay(replay: Replay): void {
     minTick,
     maxTick,
     frameMaps: new WeakMap(),
+    projMaps: new WeakMap(),
   };
 
   metaUsers = new Map();
@@ -570,6 +742,7 @@ function togglePlay(): void {
 }
 
 function selectPlayer(entity: number, mode: CameraMode = 'follow'): void {
+  if (selectedEntity !== entity || cameraMode !== mode) followSnap = true;
   selectedEntity = entity;
   cameraMode = mode;
   updateModeButtons();
@@ -591,6 +764,7 @@ function setMode(mode: CameraMode): void {
     if (fallback === null) return;
     selectedEntity = fallback;
   }
+  if (cameraMode !== mode) followSnap = mode !== 'free';
   cameraMode = mode;
   updateModeButtons();
   renderPlayers(true);
@@ -836,8 +1010,12 @@ function updateCamera(dt: number): void {
     updateModeButtons();
     return;
   }
-  const pose = lastPoses.get(selectedEntity);
-  if (!pose) return;
+  const pose = lastPoses.get(selectedEntity) ?? posesAt(playbackTick).get(selectedEntity);
+  if (!pose) {
+    hud.textContent = `Игрок #${selectedEntity} вне кадра на этом тике`;
+    return;
+  }
+  if (!Number.isFinite(pose.x + pose.y + pose.z)) return;
 
   const feet = tmpVec.set(pose.x, pose.z, -pose.y);
   const yawRad = THREE.MathUtils.degToRad(pose.yaw);
@@ -863,8 +1041,13 @@ function updateCamera(dt: number): void {
     feet.y + 60 + dist * 0.45,
     feet.z - forward.z * dist,
   );
-  const smooth = 1 - Math.exp(-9 * dt);
-  camera.position.lerp(desired, smooth);
+  if (followSnap) {
+    camera.position.copy(desired);
+    followSnap = false;
+  } else {
+    const smooth = 1 - Math.exp(-9 * dt);
+    camera.position.lerp(desired, smooth);
+  }
   camera.lookAt(feet.x, feet.y + 62, feet.z);
 }
 

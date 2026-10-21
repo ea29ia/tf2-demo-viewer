@@ -15,7 +15,37 @@ use tf_demo_parser::demo::parser::gamestateanalyser::{GameStateAnalyser, Team};
 use tf_demo_parser::{Demo, DemoParser};
 
 const MAGIC: &[u8; 4] = b"TF2R";
-const VERSION: u32 = 1;
+const VERSION: u32 = 2;
+
+/// One projectile snapshot, 24-byte on-disk record.
+#[derive(Debug, Clone, Copy)]
+struct ProjectileRecord {
+    entity: u16,
+    team: u8,
+    kind: u8, // 0 rocket, 1 arrow, 2 sticky, 3 pipe, 4 flare, 5 loose cannon, 7 unknown
+    flags: u8, // bit0 critical
+    x: f32,
+    y: f32,
+    z: f32,
+    vx: f32,
+    vy: f32,
+    vz: f32,
+}
+
+impl ProjectileRecord {
+    fn write(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.entity.to_le_bytes());
+        out.push(self.team);
+        out.push(self.kind);
+        out.push(self.flags);
+        out.extend_from_slice(&self.x.to_le_bytes());
+        out.extend_from_slice(&self.y.to_le_bytes());
+        out.extend_from_slice(&self.z.to_le_bytes());
+        out.extend_from_slice(&self.vx.to_le_bytes());
+        out.extend_from_slice(&self.vy.to_le_bytes());
+        out.extend_from_slice(&self.vz.to_le_bytes());
+    }
+}
 
 /// One player snapshot, exactly the 26-byte on-disk record.
 #[derive(Debug, Clone, Copy)]
@@ -112,6 +142,27 @@ fn push_u32(out: &mut Vec<u8>, value: u32) {
     out.extend_from_slice(&value.to_le_bytes());
 }
 
+fn projectile_snapshot(state: &GameState) -> Vec<ProjectileRecord> {
+    state
+        .projectiles
+        .values()
+        .filter(|p| p.team.is_player())
+        .filter(|p| p.position.x != 0.0 || p.position.y != 0.0 || p.position.z != 0.0)
+        .map(|p| ProjectileRecord {
+            entity: u32::from(p.id) as u16,
+            team: team_byte(p.team),
+            kind: p.ty as u8,
+            flags: if p.critical { 1 } else { 0 },
+            x: p.position.x,
+            y: p.position.y,
+            z: p.position.z,
+            vx: p.initial_speed.x,
+            vy: p.initial_speed.y,
+            vz: p.initial_speed.z,
+        })
+        .collect()
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args();
     let _exe = args.next();
@@ -128,6 +179,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut frames: Vec<u8> = Vec::new();
     let mut frame_count: u32 = 0;
     let mut max_players: usize = 0;
+    let mut max_projectiles: usize = 0;
     let mut min_tick: Option<u32> = None;
     let mut max_tick: Option<u32> = None;
     let mut bbox = [f32::INFINITY, f32::INFINITY, f32::INFINITY,
@@ -178,6 +230,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
 
         let records = snapshot(state);
+        let projectiles = projectile_snapshot(state);
+        let mut max_proj = 0usize;
         for filled in start..=tick {
             push_u32(&mut frames, filled);
             frames.extend_from_slice(&(records.len() as u16).to_le_bytes());
@@ -196,11 +250,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             }
+            frames.extend_from_slice(&(projectiles.len() as u16).to_le_bytes());
+            for p in &projectiles {
+                p.write(&mut frames);
+            }
+            max_proj = max_proj.max(projectiles.len());
             frame_count += 1;
             min_tick = Some(min_tick.map_or(filled, |m| m.min(filled)));
             max_tick = Some(max_tick.map_or(filled, |m| m.max(filled)));
         }
         max_players = max_players.max(records.len());
+        max_projectiles = max_projectiles.max(max_proj);
         last_tick = Some(tick);
     }
 
@@ -278,6 +338,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("ticks:     {}", header.ticks);
     println!("frames:    {}", frame_count);
     println!("max players: {}", max_players);
+    println!("max projectiles: {}", max_projectiles);
     println!(
         "tick range: {}..={}",
         min_tick.unwrap_or(0),

@@ -22,6 +22,7 @@
  */
 
 export const RECORD_SIZE = 26;
+export const PROJ_RECORD_SIZE = 24;
 export const MAGIC = 'TF2R';
 export const VERSION = 1;
 
@@ -69,9 +70,23 @@ export interface PlayerRecord {
   pitch: number;
 }
 
+export interface ProjectileRecord {
+  entity: number;
+  team: number;
+  kind: number; // 0 rocket, 1 arrow, 2 sticky, 3 pipe, 4 flare, 5 loose cannon, 7 unknown
+  flags: number; // bit0 critical
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+}
+
 export interface ReplayFrame {
   tick: number;
   records: PlayerRecord[];
+  projectiles: ProjectileRecord[];
 }
 
 export interface Replay {
@@ -180,7 +195,39 @@ export function parseReplay(buffer: ArrayBuffer): Replay {
       offset += RECORD_SIZE;
     }
 
-    frames[f] = { tick, records };
+    // v2+: projectiles block after player records.
+    let projectiles: ProjectileRecord[] = [];
+    if (version >= 2) {
+      if (offset + 2 > total) {
+        throw new Error(`Повреждён replay.bin: обрезан блок снарядов кадра #${f}`);
+      }
+      const projCount = view.getUint16(offset, true);
+      offset += 2;
+      const pbytes = projCount * PROJ_RECORD_SIZE;
+      if (offset + pbytes > total) {
+        throw new Error(
+          `Повреждён replay.bin: снаряды кадра #${f} требуют ${pbytes} байт, осталось ${total - offset}`,
+        );
+      }
+      projectiles = new Array(projCount);
+      for (let i = 0; i < projCount; i++) {
+        projectiles[i] = {
+          entity: view.getUint16(offset, true),
+          team: view.getUint8(offset + 2),
+          kind: view.getUint8(offset + 3),
+          flags: view.getUint8(offset + 4),
+          x: view.getFloat32(offset + 6, true),
+          y: view.getFloat32(offset + 10, true),
+          z: view.getFloat32(offset + 14, true),
+          vx: view.getFloat32(offset + 18, true),
+          vy: view.getFloat32(offset + 22, true),
+          vz: view.getFloat32(offset + 26, true),
+        };
+        offset += PROJ_RECORD_SIZE;
+      }
+    }
+
+    frames[f] = { tick, records, projectiles };
   }
 
   // Be tolerant of a producer that writes frames in a different order.
