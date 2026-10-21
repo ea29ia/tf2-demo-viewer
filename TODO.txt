@@ -45,3 +45,13 @@
   (same file), Sketchfab (requires OAuth for downloadable models), models-resource
   (blocks bots). Best path: extract from a real TF2 VPK once we have SteamCMD or
   a local install (same dependency as the "real prop meshes" item).
+
+## Player model pose (arms look like holding a weapon)
+- The glTF dumps from dribble.tf are static meshes with NO bones, baked in the
+  game's c_idle_01 pose (weapon-ready). A true "civilian pose" (arms down)
+  cannot be achieved without re-rigging in Blender (models have no skeleton).
+- Also confirmed: their pyro is the MvM bot pyro (materials = pyro_bot_*), not
+  the player pyro.
+- Real fix: extract MDLs from a TF2 install/VPK, re-pose or load with bones and
+  play actual animations (see "player models" and "prop meshes" items). All
+  roads lead to needing TF2 game files (SteamCMD or local install).
