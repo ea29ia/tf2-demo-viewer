@@ -18,6 +18,7 @@
 html, body, #app {
   margin: 0;
   height: 100%;
+  height: 100dvh;
   width: 100%;
   overflow: hidden;
   background: var(--bg);
@@ -34,7 +35,12 @@ html, body, #app {
   background: radial-gradient(1200px 700px at 50% 20%, #162231 0%, #0b0f14 70%);
 }
 
-#viewport canvas { display: block; width: 100%; height: 100%; }
+#viewport canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
 
 #sidebar {
   width: 340px;
@@ -243,6 +249,7 @@ html, body, #app {
 .check input { accent-color: var(--accent); }
 
 .hint { color: #667487; font-size: 10.5px; line-height: 1.5; padding: 0 3px 8px; margin-top: auto; }
+.hint-touch { display: none; }
 
 .hud {
   position: absolute;
@@ -295,6 +302,157 @@ html, body, #app {
 .overlay-details { color: #8b98a8; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; margin: 14px 0 0; }
 .overlay-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 18px; }
 
+/* ---------------------------------------------------------------------------
+ * Touch controls: virtual joystick + elevation slider (created only on
+ * coarse pointers from main.ts; positioned inside #viewport, so their bottom
+ * edge always sits above the mobile bottom sheet).
+ * ------------------------------------------------------------------------- */
+
+#joyStick {
+  position: absolute;
+  left: 20px;
+  bottom: 24px;
+  z-index: 6;
+  touch-action: none;
+}
+
+.joy-base {
+  width: 124px;
+  height: 124px;
+  border-radius: 50%;
+  background: rgba(17, 24, 33, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+}
+
+.joy-knob {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: rgba(240, 180, 41, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+#elevSlider {
+  position: absolute;
+  left: 156px;
+  bottom: 24px;
+  z-index: 6;
+  width: 42px;
+  height: 124px;
+  border-radius: 22px;
+  background: rgba(17, 24, 33, 0.45);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  backdrop-filter: blur(4px);
+  display: grid;
+  place-items: center;
+  touch-action: none;
+}
+
+.elev-grip {
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: rgba(240, 180, 41, 0.55);
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+  pointer-events: none;
+}
+
+/* ---------------------------------------------------------------------------
+ * Mobile: sidebar becomes a bottom sheet
+ * ------------------------------------------------------------------------- */
+
+.sheet-handle {
+  display: none;
+}
+
 @media (max-width: 820px) {
-  #sidebar { width: 290px; flex-basis: 290px; }
+  #app { flex-direction: column; }
+
+  #viewport {
+    order: 1;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  #sidebar {
+    order: 2;
+    width: 100%;
+    flex: 0 0 auto;
+    height: auto;
+    max-height: 65vh;
+    max-height: 65dvh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-overflow-scrolling: touch;
+    border-left: none;
+    border-top: 1px solid var(--line);
+    border-radius: 16px 16px 0 0;
+    box-shadow: 0 -18px 50px rgba(0, 0, 0, 0.45);
+    padding: 0 14px calc(14px + env(safe-area-inset-bottom));
+  }
+
+  /* Collapsed sheet: compact bar (timeline + play/pause + speed + modes) */
+  #sidebar:not(.expanded) {
+    max-height: calc(224px + env(safe-area-inset-bottom));
+    overflow: hidden;
+  }
+  #sidebar:not(.expanded) .brand,
+  #sidebar:not(.expanded) .players-card,
+  #sidebar:not(.expanded) .killfeed-card,
+  #sidebar:not(.expanded) .toggles,
+  #sidebar:not(.expanded) .hint {
+    display: none;
+  }
+  #sidebar:not(.expanded) .playback { padding: 10px 12px; }
+  #sidebar:not(.expanded) .timeline { margin-bottom: 4px; }
+  #sidebar:not(.expanded) .mode-row { margin-top: 6px; }
+  #sidebar:not(.expanded) .mode-btn { height: 38px; }
+
+  .sheet-handle {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    width: calc(100% + 28px);
+    margin: 0 -14px;
+    min-height: 40px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    touch-action: none;
+  }
+  .sheet-grip {
+    width: 46px;
+    height: 5px;
+    border-radius: 3px;
+    background: #3a4655;
+  }
+
+  /* Touch targets >= 40px in the bottom bar */
+  .icon-btn { width: 46px; height: 42px; font-size: 16px; }
+  .select { height: 42px; font-size: 14px; }
+  .pill-btn, .ghost-btn { height: 42px; padding: 0 16px; font-size: 13px; }
+  .mode-btn { height: 40px; font-size: 12px; }
+  .timeline { height: 28px; margin-bottom: 8px; }
+  .player-row { min-height: 44px; padding: 10px 8px; }
+  .check { min-height: 40px; }
+
+  .hint-desktop { display: none; }
+  .hint-touch { display: block; }
+
+  /* Keep HUD clear of the joystick (which lives at viewport bottom-left) */
+  .hud {
+    left: 16px;
+    bottom: auto;
+    top: calc(10px + env(safe-area-inset-top));
+  }
 }

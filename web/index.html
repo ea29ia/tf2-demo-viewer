@@ -2,7 +2,10 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
     <meta name="theme-color" content="#0b0f14" />
     <title>TF2 Demo Viewer — pl_upward</title>
   </head>
@@ -11,6 +14,15 @@
       <div id="viewport"></div>
 
       <aside id="sidebar">
+        <button
+          id="sheetHandle"
+          class="sheet-handle"
+          type="button"
+          aria-expanded="false"
+          aria-label="Развернуть панель"
+        >
+          <span class="sheet-grip"></span>
+        </button>
         <header class="brand">
           <div class="brand-mark">TF2</div>
           <div>
@@ -62,8 +74,11 @@
           <label class="check"><input id="dimPvs" type="checkbox" checked />Приглушать вне PVS</label>
         </section>
 
-        <footer class="hint">
+        <footer class="hint hint-desktop">
           WASD + Q/E — полёт · ПКМ — обзор · Space — пауза · Esc — Free · F / V — follow / POV
+        </footer>
+        <footer class="hint hint-touch">
+          Один палец — обзор · Джойстик — движение · Правый ползунок — верх/низ · Щипок — скорость
         </footer>
       </aside>
 

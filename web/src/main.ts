@@ -219,6 +219,15 @@ let lastPointerX = 0;
 let lastPointerY = 0;
 const keys = new Set<string>();
 
+// touch input state
+const isCoarse =
+  typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
+let touchSpeedMult = 1; // pinch-to-zoom → camera speed multiplier (0.4x..3x)
+let speedFlashUntil = 0; // HUD flash timestamp for the speed multiplier
+let joyForward = 0; // virtual joystick axes (-1..1), 0 on desktop
+let joySide = 0;
+let elevAxis = 0; // elevation slider (Q/E equivalent)
+
 let lastListRender = 0;
 let lastListSignature = '';
 let lastKillSignature = '';
@@ -594,6 +603,10 @@ function updateModeButtons(): void {
 }
 
 function updateHud(): void {
+  if (performance.now() < speedFlashUntil) {
+    hud.textContent = `Скорость камеры: ${touchSpeedMult.toFixed(1)}×`;
+    return;
+  }
   const labels: Record<CameraMode, string> = {
     free: 'Free',
     follow: 'Follow',
@@ -784,18 +797,23 @@ function resetFreeCamera(): void {
 
 function updateCamera(dt: number): void {
   if (cameraMode === 'free') {
-    // WASD + Q/E movement
+    // WASD + Q/E movement (keyboard) merged with virtual joystick axes (touch)
     const boost = keys.has('ShiftLeft') || keys.has('ShiftRight') ? 3.2 : 1;
-    const speedUnits = 850 * boost * dt;
+    const speedUnits = 850 * boost * dt * touchSpeedMult;
     const forward = tmpVec.set(-Math.sin(freeYaw), 0, -Math.cos(freeYaw));
     const right = tmpTarget.set(Math.cos(freeYaw), 0, -Math.sin(freeYaw));
 
-    if (keys.has('KeyW')) camera.position.addScaledVector(forward, speedUnits);
-    if (keys.has('KeyS')) camera.position.addScaledVector(forward, -speedUnits);
-    if (keys.has('KeyD')) camera.position.addScaledVector(right, speedUnits);
-    if (keys.has('KeyA')) camera.position.addScaledVector(right, -speedUnits);
-    if (keys.has('KeyE')) camera.position.y += speedUnits;
-    if (keys.has('KeyQ')) camera.position.y -= speedUnits;
+    const fwdAxis = clamp(
+      (keys.has('KeyW') ? 1 : 0) - (keys.has('KeyS') ? 1 : 0) + joyForward,
+      -1,
+      1,
+    );
+    const sideAxis = clamp((keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0) + joySide, -1, 1);
+    const upAxis = clamp((keys.has('KeyE') ? 1 : 0) - (keys.has('KeyQ') ? 1 : 0) + elevAxis, -1, 1);
+
+    if (fwdAxis !== 0) camera.position.addScaledVector(forward, speedUnits * fwdAxis);
+    if (sideAxis !== 0) camera.position.addScaledVector(right, speedUnits * sideAxis);
+    if (upAxis !== 0) camera.position.y += speedUnits * upAxis;
 
     camera.rotation.set(freePitch, freeYaw, 0, 'YXZ');
     fallbackGrid.visible = !mapBounds;
@@ -977,10 +995,25 @@ dimPvsInput.addEventListener('change', () => {
 reloadBtn.addEventListener('click', () => window.location.reload());
 dismissBtn.addEventListener('click', () => hideOverlay());
 
-// Mouse look (right mouse button)
+// Mouse look (right mouse button) / touch look (single-finger drag) / pinch speed
 renderer.domElement.addEventListener('contextmenu', (event) => event.preventDefault());
+
+const activePointers = new Map<number, { x: number; y: number }>();
+let pinchPrevDist = 0;
+
 renderer.domElement.addEventListener('pointerdown', (event) => {
-  if (event.button !== 2) return;
+  const isTouch = event.pointerType === 'touch';
+  if (!isTouch && event.button !== 2) return;
+  if (isTouch) {
+    activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (activePointers.size >= 2) {
+      // second finger → pinch gesture, cancel look drag
+      lookDragging = false;
+      const pts = [...activePointers.values()];
+      pinchPrevDist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      return;
+    }
+  }
   lookDragging = true;
   lastPointerX = event.clientX;
   lastPointerY = event.clientY;
@@ -988,6 +1021,20 @@ renderer.domElement.addEventListener('pointerdown', (event) => {
 });
 
 window.addEventListener('pointermove', (event) => {
+  if (activePointers.has(event.pointerId)) {
+    activePointers.set(event.pointerId, { x: event.clientX, y: event.clientY });
+    if (activePointers.size >= 2) {
+      const pts = [...activePointers.values()];
+      const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+      if (pinchPrevDist > 0 && dist > 0) {
+        touchSpeedMult = clamp((touchSpeedMult * dist) / pinchPrevDist, 0.4, 3);
+        speedFlashUntil = performance.now() + 1200;
+        updateHud();
+      }
+      pinchPrevDist = dist;
+      return;
+    }
+  }
   if (!lookDragging) return;
   const dx = event.clientX - lastPointerX;
   const dy = event.clientY - lastPointerY;
@@ -998,9 +1045,14 @@ window.addEventListener('pointermove', (event) => {
   freePitch = clamp(freePitch - dy * 0.0026, -1.5, 1.5);
 });
 
-window.addEventListener('pointerup', () => {
+function endPointer(event: PointerEvent): void {
+  activePointers.delete(event.pointerId);
+  if (activePointers.size < 2) pinchPrevDist = 0;
   lookDragging = false;
-});
+}
+
+window.addEventListener('pointerup', endPointer);
+window.addEventListener('pointercancel', endPointer);
 
 window.addEventListener('keydown', (event) => {
   const target = event.target as HTMLElement | null;
@@ -1037,6 +1089,149 @@ window.addEventListener('keyup', (event) => {
 });
 
 window.addEventListener('blur', () => keys.clear());
+
+// ---------------------------------------------------------------------------
+// Touch controls (joystick, elevation slider, bottom sheet)
+// ---------------------------------------------------------------------------
+
+function setupTouchControls(): void {
+  if (!isCoarse) return;
+
+  const stick = document.createElement('div');
+  stick.id = 'joyStick';
+  const base = document.createElement('div');
+  base.className = 'joy-base';
+  const knob = document.createElement('div');
+  knob.className = 'joy-knob';
+  base.append(knob);
+  stick.append(base);
+
+  const slider = document.createElement('div');
+  slider.id = 'elevSlider';
+  const grip = document.createElement('div');
+  grip.className = 'elev-grip';
+  slider.append(grip);
+
+  viewport.append(stick, slider);
+
+  // --- virtual joystick: x = strafe (A/D), y = forward/back (W/S) ---
+  const JOY_RADIUS = 42;
+  const JOY_DEADZONE = 0.16;
+  let joyId: number | null = null;
+  let joyCenterX = 0;
+  let joyCenterY = 0;
+
+  const moveJoy = (event: PointerEvent): void => {
+    if (event.pointerId !== joyId) return;
+    let dx = event.clientX - joyCenterX;
+    let dy = event.clientY - joyCenterY;
+    const dist = Math.hypot(dx, dy);
+    if (dist > JOY_RADIUS) {
+      dx = (dx / dist) * JOY_RADIUS;
+      dy = (dy / dist) * JOY_RADIUS;
+    }
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+    const nx = dx / JOY_RADIUS;
+    const ny = dy / JOY_RADIUS;
+    joySide = Math.abs(nx) < JOY_DEADZONE ? 0 : nx;
+    joyForward = Math.abs(ny) < JOY_DEADZONE ? 0 : -ny; // up = forward
+  };
+
+  base.addEventListener('pointerdown', (event) => {
+    if (joyId !== null) return;
+    joyId = event.pointerId;
+    const rect = base.getBoundingClientRect();
+    joyCenterX = rect.left + rect.width / 2;
+    joyCenterY = rect.top + rect.height / 2;
+    base.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    moveJoy(event);
+  });
+  base.addEventListener('pointermove', moveJoy);
+  const endJoy = (event: PointerEvent): void => {
+    if (event.pointerId !== joyId) return;
+    joyId = null;
+    joyForward = 0;
+    joySide = 0;
+    knob.style.transform = 'translate(0px, 0px)';
+  };
+  base.addEventListener('pointerup', endJoy);
+  base.addEventListener('pointercancel', endJoy);
+
+  // --- elevation slider: drag up/down = Q/E (fly down/up) ---
+  let elevId: number | null = null;
+  const setElev = (event: PointerEvent): void => {
+    const rect = slider.getBoundingClientRect();
+    const mid = rect.top + rect.height / 2;
+    const half = Math.max(1, rect.height / 2 - 16);
+    const value = clamp((mid - event.clientY) / half, -1, 1);
+    elevAxis = Math.abs(value) < 0.14 ? 0 : value;
+    grip.style.transform = `translateY(${(-value * half).toFixed(1)}px)`;
+  };
+  slider.addEventListener('pointerdown', (event) => {
+    if (elevId !== null) return;
+    elevId = event.pointerId;
+    slider.setPointerCapture(event.pointerId);
+    event.preventDefault();
+    setElev(event);
+  });
+  slider.addEventListener('pointermove', (event) => {
+    if (event.pointerId === elevId) setElev(event);
+  });
+  const endElev = (event: PointerEvent): void => {
+    if (event.pointerId !== elevId) return;
+    elevId = null;
+    elevAxis = 0;
+    grip.style.transform = 'translateY(0px)';
+  };
+  slider.addEventListener('pointerup', endElev);
+  slider.addEventListener('pointercancel', endElev);
+}
+
+function setupBottomSheet(): void {
+  const sheetHandle = document.getElementById('sheetHandle');
+  if (!sheetHandle) return;
+
+  const setSheet = (expanded: boolean): void => {
+    sidebar.classList.toggle('expanded', expanded);
+    sheetHandle.setAttribute('aria-expanded', String(expanded));
+  };
+
+  sheetHandle.addEventListener('click', () => {
+    setSheet(!sidebar.classList.contains('expanded'));
+  });
+
+  // swipe up on the handle expands, swipe down collapses
+  let startY: number | null = null;
+  sheetHandle.addEventListener(
+    'touchstart',
+    (event) => {
+      startY = event.touches[0]?.clientY ?? null;
+    },
+    { passive: true },
+  );
+  sheetHandle.addEventListener(
+    'touchmove',
+    (event) => {
+      if (startY === null) return;
+      const dy = (event.touches[0]?.clientY ?? startY) - startY;
+      if (dy < -28) {
+        setSheet(true);
+        startY = null;
+      } else if (dy > 28) {
+        setSheet(false);
+        startY = null;
+      }
+    },
+    { passive: true },
+  );
+  sheetHandle.addEventListener('touchend', () => {
+    startY = null;
+  });
+}
+
+setupTouchControls();
+setupBottomSheet();
 
 // ---------------------------------------------------------------------------
 // Animation loop
