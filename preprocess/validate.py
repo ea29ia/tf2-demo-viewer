@@ -15,8 +15,9 @@ import struct
 import sys
 
 MAGIC = b"TF2R"
-VERSION = 1
+VERSION = 2
 RECORD_SIZE = 26
+PROJ_RECORD_SIZE = 17
 RECORD = struct.Struct("<HBBBBfffff")
 
 
@@ -110,6 +111,18 @@ def parse(path):
                     "yaw": round(yaw, 3),
                     "pitch": round(pitch, 3),
                 }
+        if version >= 2:
+            if pos + 2 > len(data):
+                fail(f"truncated projectile header at frame {index}")
+            (proj_count,) = struct.unpack_from("<H", data, pos)
+            pos += 2
+            if proj_count > 200:
+                fail(f"frame {index}: bad projectile count {proj_count}")
+            need = proj_count * PROJ_RECORD_SIZE
+            if pos + need > len(data):
+                fail(f"truncated projectiles at frame {index}")
+            pos += need
+
         frames.append((tick, count))
 
     if pos != len(data):

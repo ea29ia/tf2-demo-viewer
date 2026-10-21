@@ -17,7 +17,9 @@ use tf_demo_parser::{Demo, DemoParser};
 const MAGIC: &[u8; 4] = b"TF2R";
 const VERSION: u32 = 2;
 
-/// One projectile snapshot, 24-byte on-disk record.
+/// One projectile snapshot, 24-byte on-disk record:
+/// entity u16, team u8, kind u8, flags u8, then xyz + velocity as
+/// quantized i16 x3 (Source units / 4, enough range ±128k).
 #[derive(Debug, Clone, Copy)]
 struct ProjectileRecord {
     entity: u16,
@@ -32,18 +34,23 @@ struct ProjectileRecord {
     vz: f32,
 }
 
+fn q16(v: f32) -> i16 {
+    let q = (v / 4.0).round() as i32;
+    q.clamp(-32768, 32767) as i16
+}
+
 impl ProjectileRecord {
     fn write(&self, out: &mut Vec<u8>) {
         out.extend_from_slice(&self.entity.to_le_bytes());
         out.push(self.team);
         out.push(self.kind);
         out.push(self.flags);
-        out.extend_from_slice(&self.x.to_le_bytes());
-        out.extend_from_slice(&self.y.to_le_bytes());
-        out.extend_from_slice(&self.z.to_le_bytes());
-        out.extend_from_slice(&self.vx.to_le_bytes());
-        out.extend_from_slice(&self.vy.to_le_bytes());
-        out.extend_from_slice(&self.vz.to_le_bytes());
+        out.extend_from_slice(&q16(self.x).to_le_bytes());
+        out.extend_from_slice(&q16(self.y).to_le_bytes());
+        out.extend_from_slice(&q16(self.z).to_le_bytes());
+        out.extend_from_slice(&q16(self.vx).to_le_bytes());
+        out.extend_from_slice(&q16(self.vy).to_le_bytes());
+        out.extend_from_slice(&q16(self.vz).to_le_bytes());
     }
 }
 

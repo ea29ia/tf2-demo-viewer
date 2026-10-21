@@ -22,9 +22,9 @@
  */
 
 export const RECORD_SIZE = 26;
-export const PROJ_RECORD_SIZE = 24;
+export const PROJ_RECORD_SIZE = 17;
 export const MAGIC = 'TF2R';
-export const VERSION = 1;
+export const VERSION = 2;
 
 export type TeamName = 'red' | 'blue' | string;
 
@@ -211,17 +211,18 @@ export function parseReplay(buffer: ArrayBuffer): Replay {
       }
       projectiles = new Array(projCount);
       for (let i = 0; i < projCount; i++) {
+        const q = (o: number): number => view.getInt16(offset + o, true) * 4;
         projectiles[i] = {
           entity: view.getUint16(offset, true),
           team: view.getUint8(offset + 2),
           kind: view.getUint8(offset + 3),
           flags: view.getUint8(offset + 4),
-          x: view.getFloat32(offset + 6, true),
-          y: view.getFloat32(offset + 10, true),
-          z: view.getFloat32(offset + 14, true),
-          vx: view.getFloat32(offset + 18, true),
-          vy: view.getFloat32(offset + 22, true),
-          vz: view.getFloat32(offset + 26, true),
+          x: q(5),
+          y: q(7),
+          z: q(9),
+          vx: q(11),
+          vy: q(13),
+          vz: q(15),
         };
         offset += PROJ_RECORD_SIZE;
       }
