@@ -18,6 +18,7 @@ MAGIC = b"TF2R"
 VERSION = 2
 RECORD_SIZE = 26
 PROJ_RECORD_SIZE = 17
+HURT_RECORD_SIZE = 15
 RECORD = struct.Struct("<HBBBBfffff")
 
 
@@ -86,7 +87,7 @@ def parse(path):
                 fail(f"frame {index}: bad team {team}")
             if cls > 9:
                 fail(f"frame {index}: bad class {cls}")
-            if flags & ~0x03:
+            if flags & ~0x0F:
                 fail(f"frame {index}: unknown flag bits {flags:#x}")
             for value in (x, y, z, yaw, pitch):
                 if not math.isfinite(value):
@@ -121,6 +122,17 @@ def parse(path):
             need = proj_count * PROJ_RECORD_SIZE
             if pos + need > len(data):
                 fail(f"truncated projectiles at frame {index}")
+            pos += need
+
+            if pos + 2 > len(data):
+                fail(f"truncated hurt header at frame {index}")
+            (hurt_count,) = struct.unpack_from("<H", data, pos)
+            pos += 2
+            if hurt_count > 100:
+                fail(f"frame {index}: bad hurt count {hurt_count}")
+            need = hurt_count * HURT_RECORD_SIZE
+            if pos + need > len(data):
+                fail(f"truncated hurt records at frame {index}")
             pos += need
 
         frames.append((tick, count))
