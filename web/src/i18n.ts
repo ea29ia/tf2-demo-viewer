@@ -39,6 +39,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     toggleDimPvs: 'Приглушать вне PVS',
     toggleModels: 'Показывать модели',
     toggleHideFoliage: 'Скрывать кусты/траву',
+    toggleWireframe: 'Сетка мешей (wireframe)',
+    togglePropBoxes: 'Каркас боксов пропов',
     // footer hints
     hintDesktop:
       'WASD + Q/E — полёт · ПКМ — обзор · Space — пауза · Esc — Free · F / V — follow / POV',
@@ -127,6 +129,8 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     toggleDimPvs: 'Dim outside PVS',
     toggleModels: 'Show models',
     toggleHideFoliage: 'Hide shrubs/grass',
+    toggleWireframe: 'Mesh wireframe',
+    togglePropBoxes: 'Prop bounding boxes',
     // footer hints
     hintDesktop:
       'WASD + Q/E — fly · RMB — look · Space — pause · Esc — Free · F / V — follow / POV',

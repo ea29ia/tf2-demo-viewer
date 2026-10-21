@@ -2,6 +2,7 @@
 
 Format: `YYYY-MM-DD | decision | why | rejected alternative`
 
+
 - 2026-10-21 | Preprocess demos offline with a Rust CLI instead of parsing in the browser | tf-demo-parser is proven and fast; browser gets a compact replay | WASM parsing in browser (parked in TODO, revisit later)
 - 2026-10-21 | replay.bin: fixed-size binary records, little endian, meta JSON embedded | streaming-friendly, ~35MB for 14min demo, trivially validatable | JSONL (2-3x bigger), protobuf (overkill)
 - 2026-10-21 | Map as pre-converted GLB with vertex colors, no textures | no Valve asset redistribution, works offline, small (4.6MB) | runtime BSP parsing in browser (heavy, textures need VPK access anyway)
@@ -30,3 +31,4 @@ Format: `YYYY-MM-DD | decision | why | rejected alternative`
 - 2026-10-21 | Sniper aim statistics designed and parked in TODO.txt (replay v3: shots block + headshot bit) | high-value feature but requires format bump; user deprioritized | implementing immediately inside v2 (format churn)
 - 2026-10-21 | docs/agent-notes with mandatory note header format + disposable notes + append-only decisions log | agents were re-exploring the codebase for narrow tasks; strict format keeps notes current and deletable | free-form wiki (rotten notes), single fat STATUS (too coarse)
 - 2026-10-21 | validate.py extended: hurt-block parsing added, flag mask widened to 0x0F | validator was written for v2-without-hurts and rejected legit new flag bits; a stale replay.bin surfaced the gap | regenerating data without fixing the validator (gap would recur)
+- 2026-10-21 | Dumper suppresses frame emission until the first tick-0 packet (signon phase) and consumes hurt events via a forward cursor | POV demos can start with signon packets carrying absolute server ticks below header.ticks, which started the replay timeline at 63467 and then reset to 0 (backwards timeline); tf-demo-parser never clears state.events, so a full scan per tick was O(n) and desynced on long demos | skipping by `tick > header.ticks` only (works by luck when signon tick exceeds header.ticks), mutating parser state (borrowed, impossible)

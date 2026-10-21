@@ -19,6 +19,13 @@ https://github.com/ea29ia/tf2-demo-viewer (public).
 
 ## Working (verified 2026-10-21 with the exact commands below)
 
+- **Dumper signon/hurt fixes (2026-10-21)**: frame emission now starts at the
+  first tick-0 packet (signon phase suppressed), fixing a backwards timeline on
+  demos whose signon tick is below `header.ticks` (cp_dustbowl); hurt events are
+  consumed via a forward cursor in `main.rs` (the analyser never clears
+  `state.events`). On-disk format unchanged, still v2. Verified on both
+  dustbowl and upward demos (validate.py OK).
+
 - **Replay data** (`web/public/replay/`): 55842 contiguous frames (ticks
   0..55841), max 24 players/frame, up to 12 projectiles, up to 11 hurt events
   per frame. Player record 26 B (flags bit0 alive, bit1 in_pvs, bit2 disguised,

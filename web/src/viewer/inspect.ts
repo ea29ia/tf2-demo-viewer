@@ -17,6 +17,7 @@ interface PropEntry {
   name: string;
   label: string;
   pos: THREE.Vector3; // scene coords (Source x,z,-y), box center
+  size: THREE.Vector3; // full box size mapped to scene axes (x, height, z)
   tol: number; // match radius: half diagonal + 16 units
 }
 
@@ -39,8 +40,7 @@ function propLabel(name: string): string {
   return '';
 }
 
-export function collectPropEntries(root: THREE.Object3D): number {
-  propEntries = [];
+export function collectPropEntries(root: THREE.Object3D): number {  propEntries = [];
   root.traverse((obj) => {
     const extras = (obj.userData as { extras?: { props?: unknown[] } }).extras;
     const props = extras?.props;
@@ -56,16 +56,65 @@ export function collectPropEntries(root: THREE.Object3D): number {
       const sy = Number(e.s[1]);
       const sz = Number(e.s[2]);
       if (![px, py, pz, sx, sy, sz].every(Number.isFinite)) continue;
-      // Source Z-up -> scene Y-up: (x, y, z) -> (x, z, -y)
+      // Source Z-up -> scene Y-up: (x, y, z) -> (x, z, -y); sizes follow the
+      // same axes: source sx -> scene x, sy -> scene z, h (source z) -> scene y.
       propEntries.push({
         name: e.n,
         label: propLabel(e.n),
         pos: new THREE.Vector3(px, pz, -py),
+        size: new THREE.Vector3(sx, sz, sy),
         tol: 0.5 * Math.hypot(sx, sy, sz) + 16,
       });
     }
   });
   return propEntries.length;
+}
+
+/**
+ * Build a wireframe overlay of every prop bounding box as ONE LineSegments
+ * object (12 edges per box, all merged into a single buffer — one draw call
+ * for ~1272 boxes). Boxes are axis-aligned in scene space: the GLB extras
+ * store each prop's center + size but not its yaw rotation, so rotated props
+ * show their upright bounding box rather than the rotated footprint.
+ */
+export function buildPropBoxOverlay(): THREE.LineSegments {
+  const positions: number[] = [];
+  for (const e of propEntries) {
+    const hx = e.size.x / 2;
+    const hy = e.size.y / 2;
+    const hz = e.size.z / 2;
+    const cx = e.pos.x;
+    const cy = e.pos.y;
+    const cz = e.pos.z;
+    // 8 corners
+    const c = [
+      [cx - hx, cy - hy, cz - hz], [cx + hx, cy - hy, cz - hz],
+      [cx + hx, cy - hy, cz + hz], [cx - hx, cy - hy, cz + hz],
+      [cx - hx, cy + hy, cz - hz], [cx + hx, cy + hy, cz - hz],
+      [cx + hx, cy + hy, cz + hz], [cx - hx, cy + hy, cz + hz],
+    ];
+    // 12 edges as corner-index pairs
+    for (const [a, b] of [
+      [0, 1], [1, 2], [2, 3], [3, 0], // bottom
+      [4, 5], [5, 6], [6, 7], [7, 4], // top
+      [0, 4], [1, 5], [2, 6], [3, 7], // verticals
+    ]) {
+      positions.push(...c[a], ...c[b]);
+    }
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+  const material = new THREE.LineBasicMaterial({
+    color: 0x53d76a,
+    transparent: true,
+    opacity: 0.55,
+    depthWrite: false,
+  });
+  const lines = new THREE.LineSegments(geometry, material);
+  lines.name = 'propBoxOverlay';
+  lines.visible = false; // checkbox drives visibility
+  lines.frustumCulled = false;
+  return lines;
 }
 
 function hideInspect(): void {

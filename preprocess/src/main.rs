@@ -182,12 +182,33 @@ impl HurtRecord {
     }
 }
 
-fn hurt_snapshot(state: &GameState) -> Vec<HurtRecord> {
+/// Collect `player_hurt` events for the current tick. `cursor` marks how many
+/// leading entries of `state.events` were already consumed on earlier ticks:
+/// the analyser only ever appends to that vector (in nondecreasing event-tick
+/// order) and never clears it, so scanning the whole vector every tick would
+/// be O(n) per tick on long demos. Consumed entries sit at indices
+/// `[0..cursor)` and are skipped; entries for the current tick are consumed
+/// too, entries for future ticks are left for later calls.
+fn hurt_snapshot(state: &GameState, cursor: &mut usize) -> Vec<HurtRecord> {
     let mut out = Vec::new();
-    for (event_tick, event) in &state.events {
-        if u32::from(*event_tick) != u32::from(state.tick) {
+    let tick = u32::from(state.tick);
+    // The borrow is valid for this call only; indices are stable within it
+    // because the vector is only appended to between calls.
+    let events = &state.events[*cursor..];
+    let mut consumed = 0usize;
+    for (i, (event_tick, event)) in events.iter().enumerate() {
+        let event_tick = u32::from(*event_tick);
+        if event_tick < tick {
+            // Event from an already-processed tick: skip it for good.
+            consumed = i + 1;
             continue;
         }
+        if event_tick > tick {
+            // Events are pushed in nondecreasing tick order, so the first
+            // future-tick event ends the scan.
+            break;
+        }
+        consumed = i + 1;
         if let tf_demo_parser::demo::gameevent_gen::GameEvent::PlayerHurt(h) = event {
             let pos = state
                 .players
@@ -227,6 +248,20 @@ fn hurt_snapshot(state: &GameState) -> Vec<HurtRecord> {
                 splash,
             });
         }
+    }
+    *cursor += consumed;
+    // Defensive cap: the on-disk record count is u16 and a runaway event
+    // backlog must never corrupt the stream. Should never trigger after the
+    // cursor fix.
+    const MAX_HURTS_PER_FRAME: usize = 4096;
+    if out.len() > MAX_HURTS_PER_FRAME {
+        eprintln!(
+            "warning: truncating hurt snapshot at tick {} ({} -> {})",
+            tick,
+            out.len(),
+            MAX_HURTS_PER_FRAME
+        );
+        out.truncate(MAX_HURTS_PER_FRAME);
     }
     out
 }
@@ -278,6 +313,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut users: BTreeMap<u32, UserEntry> = BTreeMap::new();
     let mut interval_per_tick = 0f32;
     let mut last_tick: Option<u32> = None;
+    // Frame emission starts only after the signon phase: the first packets
+    // (signon) carry absolute server ticks that would otherwise start the
+    // timeline far above 0, and the SyncTick packet then resets the tick to 0,
+    // producing a backwards timeline. `seen_sync` flips on the first tick-0
+    // packet (the SyncTick boundary).
+    let mut seen_sync = false;
+    // Cursor into the analyser's event vector, see hurt_snapshot().
+    let mut hurt_cursor: usize = 0;
+    let mut debug_packets = 0usize;
 
     while let Some(t) = ticker.next()? {
         let state = t.state;
@@ -301,9 +345,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let tick = u32::from(state.tick);
+        // Debug aid: confirm the packet order (signon tick, then SyncTick 0).
+        if debug_packets < 3 {
+            eprintln!("debug: packet #{} tick={}", debug_packets, tick);
+            debug_packets += 1;
+        }
         // Sign-on packets carry absolute server ticks; only the demo tick range
         // is part of the replay timeline.
         if tick > header.ticks {
+            continue;
+        }
+        if tick == 0 {
+            // SyncTick boundary: the real timeline starts here.
+            seen_sync = true;
+        }
+        if !seen_sync {
+            // Still in the signon phase: update users/state but emit no
+            // frames. Consume all buffered events so the hurt cursor never
+            // has to rescan them (their ticks are outside the timeline).
+            hurt_cursor = state.events.len();
             continue;
         }
         if last_tick == Some(tick) {
@@ -315,12 +375,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // gives the web player a dense frame series.
         let start = match last_tick {
             Some(prev) if tick > prev => prev + 1,
+            Some(prev) if tick < prev => {
+                // Timeline went backwards (must not happen once the signon
+                // phase is suppressed). Restart from the current tick rather
+                // than filling backwards.
+                eprintln!("warning: tick went backwards {} -> {}", prev, tick);
+                tick
+            }
             _ => tick,
         };
 
         let records = snapshot(state);
         let projectiles = projectile_snapshot(state);
-        let hurts = hurt_snapshot(state);
+        let hurts = hurt_snapshot(state, &mut hurt_cursor);
         let mut max_proj = 0usize;
         for filled in start..=tick {
             push_u32(&mut frames, filled);

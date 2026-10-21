@@ -23,12 +23,14 @@ import {
   dimPvsInput,
   showModelsInput,
   hideFoliageInput,
+  wireframeInput,
   mapNameEl,
   overlay,
   overlayDetails,
   reloadBtn,
   dismissBtn,
   loadDot,
+  propBoxesInput,
 } from './dom';
 import { clamp, fmtTime, TEAM_RED, TEAM_BLUE } from './tf2';
 import { state, MAP_URL, REPLAY_URL, type CameraMode } from './state';
@@ -38,7 +40,7 @@ import { views, createPlayerView, viewFor, applyPose, hideAllViews } from './pla
 import { posesAt } from './frameCache';
 import { applyProjectiles } from './projectiles';
 import { updateDamageFx } from './damageFx';
-import { collectPropEntries } from './inspect';
+import { collectPropEntries, buildPropBoxOverlay } from './inspect';
 import {
   setPlaying,
   togglePlay,
@@ -217,6 +219,11 @@ async function loadMap(): Promise<void> {
   const propCount = collectPropEntries(gltf.scene);
   console.log('[inspect] prop entries loaded:', propCount);
 
+  // Prop bounding-box wireframe overlay (one LineSegments, off by default).
+  propBoxOverlay = buildPropBoxOverlay();
+  scene.add(propBoxOverlay);
+  propBoxOverlay.visible = propBoxesInput.checked;
+
   // Aim the shadow-casting sun at the map and cover its full bounds with the
   // shadow camera (world is Y-up after the -PI/2 rotation).
   const mapBounds = state.mapBounds;
@@ -237,6 +244,7 @@ async function loadMap(): Promise<void> {
   }
 
   resetFreeCamera();
+  applyWireframe();
 }
 
 async function loadReplay(): Promise<void> {
@@ -338,6 +346,22 @@ showModelsInput.addEventListener('change', () => {
 
 hideFoliageInput.addEventListener('change', () => {
   for (const mesh of state.foliageMeshes) mesh.visible = !hideFoliageInput.checked;
+});
+
+// Wireframe toggle: flips material.wireframe on every map + foliage mesh.
+// The geometry is already in the loaded GLB, so this costs nothing extra.
+function applyWireframe(): void {
+  for (const mesh of [...state.mapMeshes, ...state.foliageMeshes]) {
+    const mat = mesh.material as THREE.MeshStandardMaterial | undefined;
+    if (mat && 'wireframe' in mat) mat.wireframe = wireframeInput.checked;
+  }
+}
+wireframeInput.addEventListener('change', applyWireframe);
+
+// Prop bounding-box overlay visibility (built once in loadMap).
+let propBoxOverlay: THREE.LineSegments | null = null;
+propBoxesInput.addEventListener('change', () => {
+  if (propBoxOverlay) propBoxOverlay.visible = propBoxesInput.checked;
 });
 
 reloadBtn.addEventListener('click', () => window.location.reload());
