@@ -5,3 +5,5 @@ assets/*.bsp
 web/public/maps/*.glb
 web/public/replay/*.bin
 *.log
+
+web/public/replay*/
