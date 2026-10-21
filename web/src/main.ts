@@ -186,6 +186,7 @@ interface PlayerView {
   seen: boolean;
   group: THREE.Group;
   capsule: THREE.Mesh<THREE.CapsuleGeometry, THREE.MeshStandardMaterial>;
+  arrow: THREE.Mesh<THREE.ConeGeometry, THREE.MeshBasicMaterial>;
   label: NameLabel;
 }
 
@@ -360,6 +361,15 @@ function createPlayerView(entity: number, name: string, team: number): PlayerVie
   capsule.position.y = CAPSULE_CENTER_Y;
   group.add(capsule);
 
+  // View direction arrow: a thin cone in front of the capsule.
+  const arrow = new THREE.Mesh(
+    new THREE.ConeGeometry(9, 34, 10),
+    new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85 }),
+  );
+  arrow.rotation.x = Math.PI / 2; // cone points +Z in group space
+  arrow.position.set(0, CAPSULE_CENTER_Y, CAPSULE_RADIUS + 17);
+  group.add(arrow);
+
   const label = createNameLabel();
   label.sprite.position.y = 112;
   group.add(label.sprite);
@@ -378,6 +388,7 @@ function createPlayerView(entity: number, name: string, team: number): PlayerVie
     seen: false,
     group,
     capsule,
+    arrow,
     label,
   };
   views.set(entity, view);
@@ -1163,6 +1174,8 @@ function renderKillfeed(force = false): void {
 
 const tmpVec = new THREE.Vector3();
 const tmpTarget = new THREE.Vector3();
+const raycaster = new THREE.Raycaster();
+const mapMeshes: THREE.Mesh[] = [];
 
 function resetFreeCamera(): void {
   let center = new THREE.Vector3(0, 0, 0);
@@ -1249,6 +1262,23 @@ function updateCamera(dt: number): void {
     camera.position.lerp(desired, smooth);
   }
   camera.lookAt(feet.x, feet.y + 62, feet.z);
+
+  // Keep the camera out of map geometry: raycast from the player's head to the
+  // camera; if a wall is in the way, pull the camera in front of the hit.
+  if (mapMeshes.length > 0) {
+    const head = tmpVec.set(feet.x, feet.y + 62, feet.z);
+    const toCam = camera.position.clone().sub(head);
+    const len = toCam.length();
+    if (len > 1) {
+      toCam.normalize();
+      raycaster.set(head, toCam);
+      raycaster.far = len;
+      const hits = raycaster.intersectObjects(mapMeshes, false);
+      if (hits.length > 0 && hits[0].distance < len - 24) {
+        camera.position.copy(head).addScaledVector(toCam, Math.max(24, hits[0].distance - 12));
+      }
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1290,6 +1320,10 @@ async function loadMap(): Promise<void> {
   });
 
   scene.add(gltf.scene);
+  mapMeshes.length = 0;
+  gltf.scene.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) mapMeshes.push(obj);
+  });
   gltf.scene.updateMatrixWorld(true);
   mapBounds = new THREE.Box3().setFromObject(gltf.scene);
   fallbackGrid.visible = false;
