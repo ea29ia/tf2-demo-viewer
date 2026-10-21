@@ -18,6 +18,7 @@ note tagged `#timeline` if one exists, do the job, and write back what changed.
 | `STATUS.md` | **Living document.** Current state of the project, what works, what is broken, what is in flight. Updated after every meaningful change. |
 | `NN-topic.md` | Focused notes on a specific area or investigation (e.g. `10-replay-format.md`, `20-gltf-pipeline.md`). Numbered for stable sorting. |
 | `decisions.md` | Append-only log of non-obvious decisions and their reasons. Never delete entries. |
+| `HANDOFF.md` | Session handoff: what was done, what is next, which files to open first. Regenerated at the end of long sessions. |
 
 ## Strict rules for writing notes
 
