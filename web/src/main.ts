@@ -223,6 +223,7 @@ const keys = new Set<string>();
 const isCoarse =
   typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches;
 let touchSpeedMult = 1; // pinch-to-zoom → camera speed multiplier (0.4x..3x)
+let followDistance = 265; // follow-mode camera distance behind the player
 let speedFlashUntil = 0; // HUD flash timestamp for the speed multiplier
 let joyForward = 0; // virtual joystick axes (-1..1), 0 on desktop
 let joySide = 0;
@@ -604,8 +605,12 @@ function updateModeButtons(): void {
 
 function updateHud(): void {
   if (performance.now() < zoomFlashUntil) {
-    const dist = Math.max(1, Math.round(camera.position.length()));
-    hud.textContent = `Zoom: ${dist} юнитов`;
+    if (cameraMode === 'follow') {
+      hud.textContent = `Дистанция: ${Math.round(followDistance)}`;
+    } else {
+      const dist = Math.max(1, Math.round(camera.position.length()));
+      hud.textContent = `Zoom: ${dist} юнитов`;
+    }
     return;
   }
   if (performance.now() < speedFlashUntil) {
@@ -850,12 +855,13 @@ function updateCamera(dt: number): void {
     return;
   }
 
-  // follow from behind
+  // follow from behind — pinch/wheel adjusts follow distance
   const forward = tmpTarget.set(Math.cos(yawRad), 0, -Math.sin(yawRad));
+  const dist = Math.max(80, Math.min(4000, followDistance));
   const desired = new THREE.Vector3(
-    feet.x - forward.x * 265,
-    feet.y + 175,
-    feet.z - forward.z * 265,
+    feet.x - forward.x * dist,
+    feet.y + 60 + dist * 0.45,
+    feet.z - forward.z * dist,
   );
   const smooth = 1 - Math.exp(-9 * dt);
   camera.position.lerp(desired, smooth);
@@ -1032,12 +1038,14 @@ window.addEventListener('pointermove', (event) => {
       const pts = [...activePointers.values()];
       const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
       if (pinchPrevDist > 0 && dist > 0) {
-        // Two-finger pinch now zooms the camera (dolly along view dir).
+        // Two-finger pinch: zoom. Free mode → dolly; follow/pov → follow distance.
         const factor = pinchPrevDist / dist; // spread out = move forward
-        if (cameraMode === 'free') dollyFreeCamera(factor);
-        else {
-          touchSpeedMult = clamp((touchSpeedMult * dist) / pinchPrevDist, 0.4, 3);
-          speedFlashUntil = performance.now() + 1200;
+        if (cameraMode === 'free') {
+          dollyFreeCamera(factor);
+        } else {
+          followDistance = clamp(followDistance * factor, 80, 4000);
+          zoomFlashUntil = performance.now() + 900;
+          updateHud();
         }
       }
       pinchPrevDist = dist;
@@ -1062,9 +1070,14 @@ const ZOOM_MIN = 40;     // units — don't clip into walls
 const ZOOM_MAX = 16000;  // units — far overview
 
 renderer.domElement.addEventListener('wheel', (event) => {
-  if (cameraMode !== 'free') return;
-  const factor = Math.exp(event.deltaY * 0.0012);
-  dollyFreeCamera(factor);
+  if (cameraMode === 'free') {
+    const factor = Math.exp(event.deltaY * 0.0012);
+    dollyFreeCamera(factor);
+  } else if (cameraMode === 'follow') {
+    followDistance = clamp(followDistance * Math.exp(event.deltaY * 0.0012), 80, 4000);
+    zoomFlashUntil = performance.now() + 900;
+    updateHud();
+  }
 }, { passive: true });
 
 function dollyFreeCamera(factor: number): void {
