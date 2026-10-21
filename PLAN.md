@@ -39,29 +39,54 @@ Snapshot whenever `state.tick` changes. Include only players whose team is red/b
 }
 ```
 
-`replay.bin` (little endian):
+`replay.bin` (little endian), **version 2** (current):
 ```
 magic        4 bytes  "TF2R"
-version      u32      = 1
+version      u32      = 2
 meta_len     u32
 meta         meta_len bytes UTF-8 JSON (same content as meta.json)
 frame_count  u32
 frames[frame_count]:
-  tick       u32
-  count      u16
-  count records (26 bytes each):
+  tick            u32
+  player_count    u16
+  player_count records (26 bytes each):
     entity   u16
     team     u8     2=red 3=blue
     class    u8     1..9 (scout..engineer), 0=other
-    flags    u8     bit0 alive, bit1 in_pvs
+    flags    u8     bit0 alive, bit1 in_pvs, bit2 disguised, bit3 stealthed
     health   u8
     x,y,z    f32 x3   Source units
     yaw      f32      degrees (m_angEyeAngles[1])
     pitch    f32      degrees (m_angEyeAngles[0])
+  projectile_count u16
+  projectile_count records (17 bytes each):
+    entity   u16
+    team     u8     2=red 3=blue
+    kind     u8     0 rocket, 1 arrow, 2 sticky, 3 pipe, 4 flare,
+                    5 loose cannon, 7 unknown
+    flags    u8     bit0 critical
+    x,y,z    i16 x3  quantized Source units / 4
+    vx,vy,vz i16 x3  quantized initial velocity / 4
+  hurt_count      u16
+  hurt_count records (15 bytes each):
+    victim   u16    user id (meta.users.userId namespace)
+    attacker u16    user id
+    damage   u16
+    flags    u8     bit0 crit, bit1 mini-crit, bit2 all-see-crit
+    x,y,z    i16 x3  quantized Source units / 4 (victim position)
+    splash   i16     quantized / 4; !=0 marks explosion damage with this
+                    radius (by weapon id: rocket/grenade/sticky/sentry 146,
+                    flare 110)
 ```
 
-Acceptance: `cargo run -- demo.dem out` exits 0 on `demo_upward1.dem`; frames > 50,000;
-max players per frame >= 20; every position inside [-12000, 12000]; prints a summary.
+Notes:
+- One frame is emitted per demo tick; ticks without packets repeat the last
+  snapshot so the timeline is contiguous.
+- `startTick` in meta is `header.signon`; frames with tick > header.ticks
+  (absolute sign-on ticks) are skipped.
+
+Acceptance: `dem2replay demo.dem out` exits 0; on `demo_upward1.dem`:
+55842 frames, max players 24, max projectiles 12; `validate.py` prints OK.
 
 ## Stage B — Map converter (`tools/bsp2glb.py`)
 
