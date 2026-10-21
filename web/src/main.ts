@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import './styles.css';
 import { applyLang, getLang, setLang, t } from './i18n';
+import { getModelTemplate, instantiateModel, type PlayerModelInstance } from './playerModels';
 import {
   FLAG_ALIVE,
   FLAG_IN_PVS,
@@ -43,6 +44,7 @@ const playerCount = el<HTMLSpanElement>('playerCount');
 const killfeedEl = el<HTMLUListElement>('killfeed');
 const hideDeadInput = el<HTMLInputElement>('hideDead');
 const dimPvsInput = el<HTMLInputElement>('dimPvs');
+const showModelsInput = el<HTMLInputElement>('showModels');
 const hideFoliageInput = el<HTMLInputElement>('hideFoliage');
 const mapNameEl = el<HTMLDivElement>('mapName');
 const hud = el<HTMLDivElement>('hud');
@@ -205,6 +207,9 @@ interface PlayerView {
   seen: boolean;
   group: THREE.Group;
   capsule: THREE.Mesh<THREE.CapsuleGeometry, THREE.MeshStandardMaterial>;
+  modelHolder: THREE.Group;
+  model: PlayerModelInstance | null;
+  modelKey: string;
   arrow: THREE.Mesh<THREE.ConeGeometry, THREE.MeshBasicMaterial>;
   ring: THREE.Mesh<THREE.TorusGeometry, THREE.MeshBasicMaterial>;
   label: NameLabel;
@@ -234,7 +239,7 @@ let selectedEntity: number | null = null;
 let cameraMode: CameraMode = 'free';
 let hideDead = false;
 let dimPvs = true;
-
+let showModels = true;
 let mapBounds: THREE.Box3 | null = null;
 
 // free-fly camera state
@@ -382,6 +387,11 @@ function createPlayerView(entity: number, name: string, team: number): PlayerVie
   capsule.castShadow = true;
   group.add(capsule);
 
+  // Real player model holder (models swap on (cls, team) change).
+  const modelHolder = new THREE.Group();
+  modelHolder.visible = false;
+  group.add(modelHolder);
+
   // View direction arrow: a thin cone in front of the capsule.
   const arrow = new THREE.Mesh(
     new THREE.ConeGeometry(9, 34, 10),
@@ -419,6 +429,9 @@ function createPlayerView(entity: number, name: string, team: number): PlayerVie
     seen: false,
     group,
     capsule,
+    modelHolder,
+    model: null,
+    modelKey: '',
     arrow,
     ring,
     label,
@@ -432,6 +445,41 @@ function viewFor(entity: number): PlayerView {
   if (existing) return existing;
   const name = metaUsers.get(entity) ?? `#${entity}`;
   return createPlayerView(entity, name, TEAM_RED);
+}
+
+function opacityOf(view: PlayerView): number {
+  let opacity = 1;
+  if (!view.alive) opacity = 0.24;
+  if ((view.flags & FLAG_STEALTHED) !== 0 && view.alive) opacity = Math.min(opacity, 0.45);
+  if (view.inPvs === false && dimPvs) opacity = Math.min(opacity, 0.35);
+  return opacity;
+}
+
+/** Per-instance material styling for real models (cloned materials). */
+function applyModelStyle(
+  view: PlayerView,
+  opacity: number,
+  isSpy: boolean,
+  pose: Pose,
+): void {
+  if (!view.model) return;
+  const disguised = isSpy && (pose.flags & FLAG_DISGUISED) !== 0;
+  const stealthed = isSpy && (pose.flags & FLAG_STEALTHED) !== 0;
+  for (const mat of view.model.materials) {
+    if (disguised) {
+      // Disguised spy: purple emissive tint + the true-team ring below.
+      mat.emissive.setHex(0x9b59d0);
+      mat.emissiveIntensity = 0.35;
+    } else if (stealthed) {
+      mat.emissive.setHex(0x8a7fae);
+      mat.emissiveIntensity = 0.2;
+    } else {
+      mat.emissive.setHex(0x000000);
+      mat.emissiveIntensity = view.alive ? 0 : 0.08;
+    }
+    mat.opacity = opacity;
+    mat.depthWrite = opacity > 0.7;
+  }
 }
 
 function applyPose(view: PlayerView, pose: Pose): void {
@@ -450,26 +498,48 @@ function applyPose(view: PlayerView, pose: Pose): void {
   const mat = view.capsule.material;
   const isSpy = pose.cls === CLASS_SPY;
   const stealthed = pose.stealthed;
-  if (isSpy && pose.disguised) {
-    // Disguised spy: purple body with a ring of the *real* team color.
-    mat.color.setHex(0x9b59d0);
-    mat.emissive.setHex(0x9b59d0);
-  } else if (isSpy && stealthed) {
-    // Cloaked spy: faint translucent gray-violet.
-    mat.color.setHex(0x8a7fae);
-    mat.emissive.setHex(0x8a7fae);
-  } else {
-    mat.color.setHex(teamColor(pose.team));
-    mat.emissive.setHex(teamColor(pose.team));
-  }
-  mat.emissiveIntensity = view.alive ? 0.5 : 0.08;
 
-  let opacity = 1;
-  if (!view.alive) opacity = 0.24;
-  if (stealthed && view.alive) opacity = Math.min(opacity, 0.45);
-  if (view.inPvs === false && dimPvs) opacity = Math.min(opacity, 0.35);
-  mat.opacity = opacity;
-  mat.depthWrite = opacity > 0.7;
+  // --- Real model handling -------------------------------------------------
+  const key = `${pose.cls}_${pose.team}`;
+  if (key !== view.modelKey) {
+    view.modelKey = key;
+    void getModelTemplate(pose.cls, pose.team).then((template) => {
+      // Ignore stale results: the player may have changed class meanwhile.
+      if (template === null || `${pose.cls}_${pose.team}` !== view.modelKey) return;
+      if (view.model) {
+        view.modelHolder.remove(view.model.group);
+        view.model = null;
+      }
+      view.model = instantiateModel(template);
+      view.modelHolder.add(view.model.group);
+      applyModelStyle(view, opacityOf(view), isSpy, pose);
+    });
+  }
+  const hasModel = view.model !== null && showModels;
+  view.modelHolder.visible = hasModel;
+  view.capsule.visible = !hasModel;
+  view.arrow.visible = !hasModel;
+  if (view.model && hasModel) applyModelStyle(view, opacityOf(view), isSpy, pose);
+
+  if (!hasModel) {
+    if (isSpy && pose.disguised) {
+      // Disguised spy: purple body with a ring of the *real* team color.
+      mat.color.setHex(0x9b59d0);
+      mat.emissive.setHex(0x9b59d0);
+    } else if (isSpy && stealthed) {
+      // Cloaked spy: faint translucent gray-violet.
+      mat.color.setHex(0x8a7fae);
+      mat.emissive.setHex(0x8a7fae);
+    } else {
+      mat.color.setHex(teamColor(pose.team));
+      mat.emissive.setHex(teamColor(pose.team));
+    }
+    mat.emissiveIntensity = view.alive ? 0.5 : 0.08;
+  }
+
+  const opacity = opacityOf(view);
+  mat.opacity = hasModel ? 1 : opacity;
+  mat.depthWrite = hasModel || opacity > 0.7;
 
   // Real-team ring: a thin torus at the feet shows the true team for disguised spies.
   if (isSpy && pose.disguised) {
@@ -486,6 +556,9 @@ function applyPose(view: PlayerView, pose: Pose): void {
     view.capsule.rotation.z = Math.PI / 2;
     view.capsule.position.y = CAPSULE_RADIUS;
   }
+
+  // Dead players keep the upright model but fade (opacity handled above);
+  // a capsule fallback lies on its side as before.
 
   view.group.visible = !(hideDead && !view.alive);
   view.label.sprite.visible = view.alive && opacity > 0.4;
@@ -1682,6 +1755,11 @@ hideDeadInput.addEventListener('change', () => {
 
 dimPvsInput.addEventListener('change', () => {
   dimPvs = dimPvsInput.checked;
+  applyReplayPoses();
+});
+
+showModelsInput.addEventListener('change', () => {
+  showModels = showModelsInput.checked;
   applyReplayPoses();
 });
 

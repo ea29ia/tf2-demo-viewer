@@ -37,6 +37,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     // toggles
     toggleHideDead: 'Скрывать мёртвых',
     toggleDimPvs: 'Приглушать вне PVS',
+    toggleModels: 'Показывать модели',
     toggleHideFoliage: 'Скрывать кусты/траву',
     // footer hints
     hintDesktop:
@@ -124,6 +125,7 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     // toggles
     toggleHideDead: 'Hide dead',
     toggleDimPvs: 'Dim outside PVS',
+    toggleModels: 'Show models',
     toggleHideFoliage: 'Hide shrubs/grass',
     // footer hints
     hintDesktop:
