@@ -92,8 +92,11 @@ def main(argv) -> int:
     print(f"bbox max:  ({bbox_max[0]:.3f}, {bbox_max[1]:.3f}, {bbox_max[2]:.3f})")
 
     errors = []
-    if tri_count < 50000:
-        errors.append(f"too few triangles: {tri_count} < 50000")
+    # Threshold re-calibrated after the ear-clip fix in bsp2glb.py: the old
+    # fan triangulation emitted ~21k degenerate sliver triangles, inflating
+    # the count above 65k. A healthy upward build has ~44k triangles.
+    if tri_count < 35000:
+        errors.append(f"too few triangles: {tri_count} < 35000")
     if abs(bbox_min[0]) > 12000 or abs(bbox_max[0]) > 12000:
         errors.append("x bbox outside +/-12000")
     if abs(bbox_min[1]) > 12000 or abs(bbox_max[1]) > 12000:

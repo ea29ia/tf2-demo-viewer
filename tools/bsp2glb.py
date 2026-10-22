@@ -205,6 +205,10 @@ def dot(a, b):
     return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
 
 
+def dist2(a, b):
+    return (a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2
+
+
 def normalize(v):
     length = math.sqrt(dot(v, v))
     if length < 1e-12:
@@ -270,6 +274,88 @@ class MeshBuilder:
             self.indices.extend((a, c, b))
         else:
             self.indices.extend((a, b, c))
+
+
+def clean_polygon(poly, normal):
+    """Drop near-duplicate and near-collinear vertices from a face polygon."""
+    EPS_DUP2 = 0.05   # squared distance below which points are the same
+    EPS_AREA2 = 1.0   # squared cross product below which 3 points are collinear
+    # remove consecutive duplicates
+    pts = []
+    for p in poly:
+        if pts and dist2(pts[-1], p) < EPS_DUP2:
+            continue
+        pts.append(p)
+    while len(pts) > 1 and dist2(pts[0], pts[-1]) < EPS_DUP2:
+        pts.pop()
+    if len(pts) < 3:
+        return pts
+    # remove collinear middle points (on the dominant plane)
+    axis = max(range(3), key=lambda i: abs(normal[i]))
+    u, v = [i for i in range(3) if i != axis]
+    changed = True
+    while changed and len(pts) > 3:
+        changed = False
+        for i in range(len(pts)):
+            a, b, c = pts[i - 1], pts[i], pts[(i + 1) % len(pts)]
+            ab = (b[u] - a[u], b[v] - a[v])
+            bc = (c[u] - b[u], c[v] - b[v])
+            cr = ab[0] * bc[1] - ab[1] * bc[0]
+            if cr * cr < EPS_AREA2:
+                del pts[i]
+                changed = True
+                break
+    return pts
+
+
+def ear_clip(poly, normal):
+    """Ear-clip a polygon projected onto its dominant plane.
+
+    Returns index triples into `poly`. Zero-area ears are skipped; for
+    robustness, falls back to a fan when clipping stalls.
+    """
+    axis = max(range(3), key=lambda i: abs(normal[i]))
+    u, v = [i for i in range(3) if i != axis]
+    n = len(poly)
+    idx = list(range(n))
+    out = []
+    guard = 0
+    while len(idx) > 3 and guard < 4 * n:
+        guard += 1
+        clipped = False
+        for k in range(len(idx)):
+            i0 = idx[k - 1]
+            i1 = idx[k]
+            i2 = idx[(k + 1) % len(idx)]
+            a, b, c = poly[i0], poly[i1], poly[i2]
+            ab = (b[u] - a[u], b[v] - a[v])
+            ac = (c[u] - a[u], c[v] - a[v])
+            cr = ab[0] * ac[1] - ab[1] * ac[0]
+            # orientation must match the polygon winding
+            if cr * normal[axis] <= 1e-6:
+                continue  # reflex or degenerate ear
+            if any(_point_in_tri(poly[j], a, b, c, u, v)
+                   for j in idx if j not in (i0, i1, i2)):
+                continue
+            out.append((i0, i1, i2))
+            del idx[k]
+            clipped = True
+            break
+        if not clipped:
+            break  # fall through to fan
+    # remaining vertices (fan) — usually just the final triangle
+    for k in range(1, len(idx) - 1):
+        out.append((idx[0], idx[k], idx[k + 1]))
+    return out
+
+
+def _point_in_tri(p, a, b, c, u, v):
+    def sign(p1, p2, p3):
+        return (p1[u] - p3[u]) * (p2[v] - p3[v]) - (p2[u] - p3[u]) * (p1[v] - p3[v])
+    d1, d2, d3 = sign(p, a, b), sign(p, b, c), sign(p, c, a)
+    has_neg = d1 < -1e-6 or d2 < -1e-6 or d3 < -1e-6
+    has_pos = d1 > 1e-6 or d2 > 1e-6 or d3 > 1e-6
+    return not (has_neg and has_pos)
 
 
 def build(bsp: Bsp) -> MeshBuilder:
@@ -356,11 +442,19 @@ def build(bsp: Bsp) -> MeshBuilder:
         return out
 
     def add_flat(face, poly, normal, color):
+        # Brush faces accumulate near-duplicate and collinear vertices from
+        # plane splits; a naive fan over them emits zero-area triangles and
+        # long needle slivers that stick out of the surface (visible as
+        # spikes). Clean the polygon, then ear-clip on the dominant plane.
+        cleaned = clean_polygon(poly, normal)
+        if len(cleaned) < 3:
+            return
         base = mesh.vertex_count
-        for p in poly:
+        for p in cleaned:
             mesh.add_vertex(p, normal, color)
-        for i in range(1, len(poly) - 1):
-            mesh.add_triangle(base, base + i, base + i + 1, normal)
+        for tri in ear_clip(cleaned, normal):
+            mesh.add_triangle(base + tri[0], base + tri[1],
+                              base + tri[2], normal)
 
     def add_displacement(face, poly, face_normal, color):
         disp_index = face[6]
