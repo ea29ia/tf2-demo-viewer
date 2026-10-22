@@ -235,3 +235,21 @@ cd web && npx tsc --noEmit && npm run build
   disagreements mirror islands. tsc + vite build exit 0.
 - User to verify visually in Firefox; [dbg] console.log still in
   modelview.html — remove after confirmation.
+
+## 2026-10-22: offline TF2 data copy for phone-based development
+
+- `~/Documents/tf2/` (287 MB) now holds an offline subset of the Steam TF2
+  install, used when the desktop is unavailable:
+  - `tf/materials/`, `tf/models/` — exactly the files mdl2glb needs: the 9
+    base player models (mdl/vvd/dx90/dx80/sw.vtx), hwm variants, all
+    materials/models/player VMTs, and all non-item VTFs for player
+    materials (~117 MB; the `items/` cosmetics subtree was skipped).
+  - `demos/` — demp.dem, demp_2.dem, pocket.dem, pocket1.dem, fix.dem.
+  - `assets/pl_upward.bsp` already lives in the repo working tree.
+- `tools/vpk.py` gained `LoosePack` + `open_pack(tf_dir, name)`: plain
+  directory tree works wherever a VPK set did. `mdl2glb.py` uses it for
+  both the model pack and `Textures`. Verified: medic GLB from the loose
+  tree is byte-identical (JSON) to the VPK-run output (8288 tris).
+- Usage from the offline copy:
+  `python3 tools/mdl2glb.py ~/Documents/tf2/tf models/player/<cls> web/public/models/players/<cls>`
+  (demoman dir is `models/player/demo`).
