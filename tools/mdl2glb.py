@@ -598,7 +598,7 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
         "scenes": [{"nodes": [0]}],
         "nodes": [{"mesh": 0, "name": name}],
         "meshes": [{"name": name, "primitives": primitives}],
-        "materials": materials,
+        "materials": [dict(m, alphaMode="OPAQUE") for m in materials],
         "textures": textures_gltf,
         "images": images,
         "samplers": [{"magFilter": 9729, "minFilter": 9987,
@@ -623,13 +623,19 @@ def png_bytes(width: int, height: int, rgba: bytes) -> bytes:
         return struct.pack(">I", len(payload)) + body + struct.pack(
             ">I", zlib.crc32(body) & 0xFFFFFFFF)
 
-    stride = width * 4
+    # The VTF alpha channel on player textures holds a specular mask, not
+    # opacity — flatten to opaque RGB (color type 2), keep 4-byte input layout.
+    stride_in = width * 4
+    stride_out = width * 3
     raw = bytearray()
     for y in range(height):
+        row = rgba[y * stride_in:(y + 1) * stride_in]
+        row = bytearray(row)
+        del row[3::4]  # strip alpha channel
         raw.append(0)
-        raw += rgba[y * stride:(y + 1) * stride]
+        raw += row
     out = b"\x89PNG\r\n\x1a\n"
-    out += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
+    out += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
     out += chunk(b"IDAT", zlib.compress(bytes(raw), 6))
     out += chunk(b"IEND", b"")
     return out
