@@ -5,7 +5,14 @@
 - Scope: `tools/vpk.py`, `tools/vtf.py`, `tools/mdl2glb.py` (new), VPK/MDL/VVD/VTX
 - Tags: #vpk #mdl #vtf #models #textures #vpk-unlocked
 
-## State
+## State (updated 2026-10-22, night)
+
+All 9 player classes export cleanly; see the STATUS.md block for the fixes
+(garbage placeholder models, VPK-wide material resolution, axis mapping
+(x,y,z)->(z,y,-x) — model space is y-up/forward+z, NOT z-up). Headless
+chromium (playwright-core, browser cached in ~/.cache/ms-playwright) can be
+used for visual checks: npm i playwright-core in /tmp/opencode, then a
+scratch page in web/public/ + `node shot.mjs`.
 
 The long-standing "blocked on VPK access" limitation is GONE on this machine:
 TF2 is installed locally at

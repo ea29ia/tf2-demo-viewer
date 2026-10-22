@@ -142,6 +142,37 @@ cd web && npx tsc --noEmit && npm run build
   kept in web/public/replay/backup_upward/, not in git).
 - Click-to-inspect still broken (user reports clicks don't fire); deferred.
 
+## Session update — 2026-10-22 (night): VPK player models shipped
+
+- **All 9 classes × 2 teams exported from the local VPKs** into
+  `web/public/models/players/` (18 GLBs, ~9 MB total, gitignored — rebuild
+  with `tools/mdl2glb.py <tf_dir> models/player/<class> web/public/models/players/<class>`,
+  note: demoman's model path is `models/player/demo`, heavy is `models/player/heavy`
+  with materials in `models/player/hvyweapon/`). The dribble.tf DRACO set and
+  the MvM robo-pyro are gone; DRACOLoader removed from playerModels.ts and
+  modelTest.ts (no more gstatic CDN dependency).
+- **mdl2glb.py fixes** (all hit during the batch export):
+  - Empty placeholder models in bodyparts (nummodels=2, second model is
+    padding with garbage fields) caused out-of-bounds reads on
+    soldier/medic/engineer/sniper/spy — added bounds guards + skip when
+    nummeshes/numvertices <= 0.
+  - Bare material names must NOT be prefixed with the model's directory:
+    heavy's model is models/player/heavy but materials are
+    models/player/hvyweapon. New `Textures.resolve_material()` does a
+    VPK-wide search over materials/models/player/* when direct paths miss.
+  - Axis conversion added: VVD model space is RH with up=+y, forward=+z,
+    left=+x (NOT z-up! verified via eyeball pair: eyeball_l at +x, eyes at
+    +z front). Mapping to glTF: (x,y,z) -> (z,y,-x) so the model faces its
+    local +x, which is what the viewer needs (group.rotation.y = yaw,
+    forward=(cos yaw, 0, -sin yaw)). Feet land at y=0; heights 79-87 u.
+- **Verification**: headless chromium (playwright-core, browser in
+  ~/.cache/ms-playwright) rendered `_modelcheck.html` (temp page, since
+  removed) and the real app: all GLB requests 200, no page errors, no
+  model-fallback warnings; tsc + vite build exit 0. Committed 22a2620.
+  Not yet verified: user eyeball check of facing direction in motion.
+- Known cosmetic: eyeball meshes render with the flat iris texture (no
+  cornea refraction) — acceptable for now.
+
 ## Session update — 2026-10-22 (evening, x86_64 desktop)
 
 - **Environment changed**: this session runs on x86_64 Linux (not the Termux

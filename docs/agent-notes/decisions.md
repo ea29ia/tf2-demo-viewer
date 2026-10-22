@@ -40,3 +40,12 @@ Format: `YYYY-MM-DD | decision | why | rejected alternative`
 - 2026-10-22 | Convert MDL→GLB at bind pose without bones | the viewer only needs static player/prop meshes; skinning adds rigging complexity for no visual gain at capsule scale | full skinning export (needs animation system first)
 - 2026-10-22 | Click-inspect reads `userData.props`, not `userData.extras.props` | three.js GLTFLoader merges glTF `node.extras` into `object.userData` via `Object.assign`, so the nested key never existed and the lookup silently loaded 0 props | reading the raw GLTF JSON separately (duplicate source of truth)
 - 2026-10-22 | Static props are culled against worldspawn world_mins/maxs intersected with the old sane constants (same rule as bsp2glb.py) | 3D-skybox props sit thousands of units outside the playable world; the loose -12000..12000 box let ~90 of them into the GLB (visible floating boxes, bbox max x 8898) | filtering by "skybox" in the model name (misses boulder6/boulder7 in the skybox area)
+
+## 2026-10-22 — mdl2glb model-space orientation (y-up, not z-up)
+The handoff assumed MDL/VVD data is Source Z-up. It is not: player VVD vertex
+pools have up=+y, forward=+z, left=+x (proved by the eyeball pair: eyeball_l
+at +x, both eyes at +z). The GLB mapping is therefore (x,y,z)->(z,y,-x), which
+both keeps Y-up (glTF) and makes the model face local +x — the direction the
+viewer needs because it applies group.rotation.y = yaw with forward
+(cos yaw, 0, -sin yaw). If future prop models look "lying down", suspect a
+different model-space convention in their VVD before touching the viewer.
