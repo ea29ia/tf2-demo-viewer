@@ -362,6 +362,18 @@ class Textures:
             except Exception as exc:
                 print(f"  warn: vtf decode failed for {cand}: {exc}", file=sys.stderr)
                 continue
+            # VTF flag 0x40 = TEXTUREFLAGS_SRGB: pixel values are LINEAR and the
+            # engine converts them to sRGB on sample. PNGs are interpreted as
+            # sRGB by the viewer, so encode linear data back to sRGB here.
+            # (demoman textures carry the flag; scout's don't — same face pixels
+            # measured 3x darker without this step.)
+            flags = struct.unpack_from("<I", data, 20)[0]
+            w, h, rgba = out
+            if flags & 0x40:
+                rgba = bytes(
+                    b if (i & 3) == 3 else round((b / 255.0) ** (1.0 / 2.2) * 255)
+                    for i, b in enumerate(rgba))
+                out = (w, h, rgba)
             self.cache[texture_name] = out
             return out
         self.cache[texture_name] = None
