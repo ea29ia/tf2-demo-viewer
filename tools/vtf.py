@@ -172,9 +172,14 @@ def decode_vtf(data: bytes) -> tuple[int, int, bytes]:
         raise VtfError("animated VTF not supported")
     if mip_count < 1:
         raise VtfError("VTF has no mipmaps")
-    # Mip 0 (largest) starts right after the header; smaller mips follow it.
-    start = header_size
     size = _mip_size(fmt, width, height)
+    # VTF stores the mip chain smallest-first, so the largest mip (mip 0)
+    # is the LAST mip_size bytes of the image data — not the first. Reading
+    # from the start yields small-mip thumbnails followed by the head of
+    # larger mips: a spatially scrambled image (verified by mip
+    # self-consistency: mip0-downscaled vs mip1 mean|diff| = 1.0 for
+    # last-largest vs 41.4 for first-largest).
+    start = header_size + (len(data) - header_size) - size
     block = data[start:start + size]
     if len(block) < size:
         raise VtfError(f"truncated VTF data (need {size}, have {len(block)})")
