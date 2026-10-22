@@ -15,7 +15,7 @@ use tf_demo_parser::demo::parser::gamestateanalyser::{GameStateAnalyser, Team};
 use tf_demo_parser::{Demo, DemoParser};
 
 const MAGIC: &[u8; 4] = b"TF2R";
-const VERSION: u32 = 2;
+const VERSION: u32 = 3;
 
 /// One projectile snapshot, 24-byte on-disk record:
 /// entity u16, team u8, kind u8, flags u8, then xyz + velocity as
@@ -54,14 +54,15 @@ impl ProjectileRecord {
     }
 }
 
-/// One player snapshot, exactly the 26-byte on-disk record.
+/// One player snapshot, exactly the 27-byte on-disk record.
+/// Health is u16: heavy spawns at 300 which does not fit in u8.
 #[derive(Debug, Clone, Copy)]
 struct Record {
     entity: u16,
     team: u8,
     class: u8,
     flags: u8,
-    health: u8,
+    health: u16,
     x: f32,
     y: f32,
     z: f32,
@@ -75,7 +76,7 @@ impl Record {
         out.push(self.team);
         out.push(self.class);
         out.push(self.flags);
-        out.push(self.health);
+        out.extend_from_slice(&self.health.to_le_bytes());
         out.extend_from_slice(&self.x.to_le_bytes());
         out.extend_from_slice(&self.y.to_le_bytes());
         out.extend_from_slice(&self.z.to_le_bytes());
@@ -109,9 +110,54 @@ fn team_str(team: Team) -> &'static str {
     }
 }
 
+/// Per-user authoritative health observation from `player_hurt` events.
+/// The event carries the victim's remaining health and is broadcast for every
+/// player (even ones outside the recorder's PVS), so it is more reliable than
+/// the `m_iHealth` sendprop, which only arrives while the entity is in PVS.
+type HealthOverrides = BTreeMap<u32, (u32, u16)>;
+
+/// Class base health, matching tf-demo-parser's `Class` enum (which mirrors
+/// TF2's TF_CLASS_* ids). Used as the spawn-health baseline on respawn.
+fn class_base_health(class: tf_demo_parser::demo::parser::analyser::Class) -> u16 {
+    use tf_demo_parser::demo::parser::analyser::Class;
+    match class {
+        Class::Scout | Class::Sniper | Class::Spy | Class::Engineer => 125,
+        Class::Soldier => 200,
+        Class::Demoman | Class::Pyro => 175,
+        Class::Medic => 150,
+        Class::Heavy => 300,
+        Class::Other => 0,
+    }
+}
+
 /// Build the ordered record list for a game state. Only red/blue players are
 /// included; the order is stable (ascending entity id).
-fn snapshot(state: &GameState) -> Vec<Record> {
+///
+/// Health sourcing, freshest source wins:
+/// 1. `player_hurt` events (`overrides`): global, authoritative at damage
+///    time, work for players outside the recorder's PVS.
+/// 2. `m_iHealth` sendprops: exact while the entity is in PVS, but they stop
+///    arriving once it leaves, and on PVS re-entry the demo's per-entity
+///    instance baseline can resurface a stale value (observed: the same wrong
+///    constant reappearing after every respawn).
+/// 3. On respawn (dead -> alive with a known recent death) the health is
+///    forced to the class base: spawning always restores full health.
+///
+/// `prop_health`/`prop_change_tick` track when the sendprop stream last
+/// actually changed a value; an override only rules while it is more recent
+/// than that. A prop change on the respawn tick itself is ignored (that is
+/// the stale instance baseline resurfacing, not real damage); any later prop
+/// change or hurt event takes over again.
+fn snapshot(
+    state: &GameState,
+    overrides: &mut HealthOverrides,
+    deaths: &BTreeMap<u32, u32>,
+    prop_health: &mut BTreeMap<u32, u16>,
+    prop_change_tick: &mut BTreeMap<u32, u32>,
+    prev_alive: &mut BTreeMap<u32, bool>,
+    respawn_tick: &mut BTreeMap<u32, u32>,
+    tick: u32,
+) -> Vec<Record> {
     let mut players: Vec<_> = state
         .players
         .iter()
@@ -121,9 +167,51 @@ fn snapshot(state: &GameState) -> Vec<Record> {
 
     players
         .into_iter()
-        .map(|p| {
+        .filter_map(|p| {
+            let user_id = u32::from(p.info.as_ref()?.user_id);
+            let now_alive = p.state == PlayerState::Alive;
+            let mut health = p.health;
+
+            if now_alive && prev_alive.get(&user_id) == Some(&false) {
+                if let Some(&died) = deaths.get(&user_id) {
+                    // Respawn queue plus a walk out of spawn takes tens of
+                    // seconds; 30 s (~1980 ticks) comfortably covers it.
+                    if died < tick && tick - died <= 1980 {
+                        let base = class_base_health(p.class);
+                        if base > 0 {
+                            health = base;
+                            respawn_tick.insert(user_id, tick);
+                            // The death-time override (health 0) must not
+                            // survive the respawn: spawning restores health.
+                            overrides.remove(&user_id);
+                        }
+                    }
+                }
+            }
+
+            if prop_health.get(&user_id) != Some(&p.health) {
+                prop_health.insert(user_id, p.health);
+                let respawn = respawn_tick.get(&user_id).copied();
+                let is_respawn_tick = matches!(respawn, Some(rt) if tick <= rt);
+                if !is_respawn_tick {
+                    prop_change_tick.insert(user_id, tick);
+                }
+            }
+            if let Some((override_tick, override_health)) = overrides.get(&user_id) {
+                let prop_tick = prop_change_tick.get(&user_id).copied().unwrap_or(0);
+                if *override_tick > prop_tick {
+                    health = *override_health;
+                }
+            }
+            // While dead the sendprop often still reads 1; the analyser's life
+            // state is ground truth, so dead players are always reported 0.
+            if !now_alive {
+                health = 0;
+            }
+            prev_alive.insert(user_id, now_alive);
+
             let mut flags = 0u8;
-            if p.state == PlayerState::Alive {
+            if now_alive {
                 flags |= 1;
             }
             if p.in_pvs {
@@ -135,18 +223,18 @@ fn snapshot(state: &GameState) -> Vec<Record> {
             if p.has_condition(tf_demo_parser::demo::data::game_state::PlayerCondition::Stealthed) {
                 flags |= 8;
             }
-            Record {
+            Some(Record {
                 entity: u32::from(p.entity) as u16,
                 team: team_byte(p.team),
                 class: p.class as u8,
                 flags,
-                health: p.health.min(255) as u8,
+                health,
                 x: p.position.x,
                 y: p.position.y,
                 z: p.position.z,
                 yaw: p.view_angle,
                 pitch: p.pitch_angle,
-            }
+            })
         })
         .collect()
 }
@@ -182,14 +270,30 @@ impl HurtRecord {
     }
 }
 
-/// Collect `player_hurt` events for the current tick. `cursor` marks how many
-/// leading entries of `state.events` were already consumed on earlier ticks:
-/// the analyser only ever appends to that vector (in nondecreasing event-tick
-/// order) and never clears it, so scanning the whole vector every tick would
+/// Collect `player_hurt` events for the current tick and record the victims'
+/// authoritative post-hit health into `overrides` and death ticks into
+/// `deaths`. `cursor` marks how many leading entries of `state.events` were
+/// already consumed on earlier ticks: the analyser only ever appends to that
+/// vector and never clears it, so scanning the whole vector every tick would
 /// be O(n) per tick on long demos. Consumed entries sit at indices
-/// `[0..cursor)` and are skipped; entries for the current tick are consumed
-/// too, entries for future ticks are left for later calls.
-fn hurt_snapshot(state: &GameState, cursor: &mut usize) -> Vec<HurtRecord> {
+/// `[0..cursor)` and are skipped; entries for future ticks are left for later
+/// calls.
+///
+/// Game events are retransmitted by the server in later packets, so the same
+/// event can appear in the vector several times; `seen` (hashes of processed
+/// events) keeps bookkeeping and hurt output idempotent. Each event is
+/// therefore processed at first sight, even if its recorded tick is older
+/// than the current packet tick (late delivery); the current tick is used as
+/// the observation time for overrides and deaths. Hurt records are only
+/// emitted for events whose tick matches the current tick, as before.
+fn hurt_snapshot(
+    state: &GameState,
+    cursor: &mut usize,
+    overrides: &mut HealthOverrides,
+    deaths: &mut BTreeMap<u32, u32>,
+    seen: &mut std::collections::HashSet<u64>,
+) -> Vec<HurtRecord> {
+    use std::hash::{Hash, Hasher};
     let mut out = Vec::new();
     let tick = u32::from(state.tick);
     // The borrow is valid for this call only; indices are stable within it
@@ -198,18 +302,42 @@ fn hurt_snapshot(state: &GameState, cursor: &mut usize) -> Vec<HurtRecord> {
     let mut consumed = 0usize;
     for (i, (event_tick, event)) in events.iter().enumerate() {
         let event_tick = u32::from(*event_tick);
-        if event_tick < tick {
-            // Event from an already-processed tick: skip it for good.
-            consumed = i + 1;
-            continue;
-        }
         if event_tick > tick {
             // Events are pushed in nondecreasing tick order, so the first
             // future-tick event ends the scan.
             break;
         }
+        // Deduplicate retransmissions by event content (GameEvent does not
+        // implement Hash, so hash its Debug representation).
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        event_tick.hash(&mut hasher);
+        format!("{:?}", event).hash(&mut hasher);
+        if !seen.insert(hasher.finish()) {
+            consumed = i + 1;
+            continue;
+        }
         consumed = i + 1;
+        if let tf_demo_parser::demo::gameevent_gen::GameEvent::PlayerDeath(d) = event {
+            // Some kills (e.g. certain world/environment deaths) never produce
+            // a player_hurt event, so death detection needs this event too.
+            deaths.insert(u32::from(d.user_id), tick);
+            continue;
+        }
         if let tf_demo_parser::demo::gameevent_gen::GameEvent::PlayerHurt(h) = event {
+            // The event's `health` field is the victim's remaining health
+            // straight from the server: authoritative even for players the
+            // recorder cannot see (out-of-PVS sendprops never arrive).
+            overrides.insert(u32::from(h.user_id), (tick, h.health));
+            if h.health == 0 {
+                // Death: remembered so the next dead -> alive transition can
+                // be recognised as a respawn (see snapshot).
+                deaths.insert(u32::from(h.user_id), tick);
+            }
+            if event_tick != tick {
+                // Late retransmission of an already-emitted tick: record the
+                // health above, but do not duplicate the hurt record.
+                continue;
+            }
             let pos = state
                 .players
                 .iter()
@@ -321,7 +449,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut seen_sync = false;
     // Cursor into the analyser's event vector, see hurt_snapshot().
     let mut hurt_cursor: usize = 0;
-    let mut debug_packets = 0usize;
+    // Authoritative health from player_hurt events, per user id (see snapshot).
+    let mut health_overrides: HealthOverrides = BTreeMap::new();
+    // Last tick a user was known dead with 0 health (see snapshot).
+    let mut death_ticks: BTreeMap<u32, u32> = BTreeMap::new();
+    // Last sendprop-derived health per user id, and the tick it last changed.
+    let mut prop_health: BTreeMap<u32, u16> = BTreeMap::new();
+    let mut prop_change_tick: BTreeMap<u32, u32> = BTreeMap::new();
+    // Per-user alive flag from the previous emitted tick, and the tick of the
+    // last forced respawn reset.
+    let mut prev_alive: BTreeMap<u32, bool> = BTreeMap::new();
+    let mut respawn_tick: BTreeMap<u32, u32> = BTreeMap::new();
+    // Hashes of already-processed game events (retransmission dedupe).
+    let mut seen_events: std::collections::HashSet<u64> = std::collections::HashSet::new();
 
     while let Some(t) = ticker.next()? {
         let state = t.state;
@@ -345,11 +485,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
 
         let tick = u32::from(state.tick);
-        // Debug aid: confirm the packet order (signon tick, then SyncTick 0).
-        if debug_packets < 3 {
-            eprintln!("debug: packet #{} tick={}", debug_packets, tick);
-            debug_packets += 1;
-        }
         // Sign-on packets carry absolute server ticks; only the demo tick range
         // is part of the replay timeline.
         if tick > header.ticks {
@@ -385,9 +520,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => tick,
         };
 
-        let records = snapshot(state);
+        // Hurt events must be consumed before the snapshot so this tick's
+        // health corrections are already in place when records are built.
+        let hurts = hurt_snapshot(
+            state,
+            &mut hurt_cursor,
+            &mut health_overrides,
+            &mut death_ticks,
+            &mut seen_events,
+        );
+        let records = snapshot(
+            state,
+            &mut health_overrides,
+            &death_ticks,
+            &mut prop_health,
+            &mut prop_change_tick,
+            &mut prev_alive,
+            &mut respawn_tick,
+            tick,
+        );
         let projectiles = projectile_snapshot(state);
-        let hurts = hurt_snapshot(state, &mut hurt_cursor);
         let mut max_proj = 0usize;
         for filled in start..=tick {
             push_u32(&mut frames, filled);

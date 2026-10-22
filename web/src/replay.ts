@@ -10,12 +10,12 @@
  *   frames[frame_count]:
  *     tick       u32
  *     count      u16
- *     count * 26-byte records:
+ *     count * 27-byte records (v3):
  *       entity   u16
  *       team     u8     2=red, 3=blue
  *       class    u8     1..9 (scout..engineer), 0=other
  *       flags    u8     bit0 alive, bit1 in_pvs
- *       health   u8
+ *       health   u16
  *       x,y,z    f32 x3 Source units
  *       yaw      f32    degrees
  *       pitch    f32    degrees
@@ -23,11 +23,11 @@
 
 import { t } from './i18n';
 
-export const RECORD_SIZE = 26;
+export const RECORD_SIZE = 27;
 export const PROJ_RECORD_SIZE = 17;
 export const HURT_RECORD_SIZE = 15;
 export const MAGIC = 'TF2R';
-export const VERSION = 2;
+export const VERSION = 3;
 
 export type TeamName = 'red' | 'blue' | string;
 
@@ -201,12 +201,12 @@ export function parseReplay(buffer: ArrayBuffer): Replay {
         team: view.getUint8(offset + 2),
         cls: view.getUint8(offset + 3),
         flags: view.getUint8(offset + 4),
-        health: view.getUint8(offset + 5),
-        x: view.getFloat32(offset + 6, true),
-        y: view.getFloat32(offset + 10, true),
-        z: view.getFloat32(offset + 14, true),
-        yaw: view.getFloat32(offset + 18, true),
-        pitch: view.getFloat32(offset + 22, true),
+        health: view.getUint16(offset + 5, true),
+        x: view.getFloat32(offset + 7, true),
+        y: view.getFloat32(offset + 11, true),
+        z: view.getFloat32(offset + 15, true),
+        yaw: view.getFloat32(offset + 19, true),
+        pitch: view.getFloat32(offset + 23, true),
       };
       offset += RECORD_SIZE;
     }

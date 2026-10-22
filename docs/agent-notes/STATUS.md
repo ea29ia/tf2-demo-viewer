@@ -11,13 +11,28 @@ in `PLAN.md`, project rules in `AGENTS.md`, roadmap in `TODO.txt`.
 ## What this project is
 
 Browser viewer for TF2 POV demos. Pipeline: `.dem` → Rust dumper
-(`preprocess/src/main.rs`) → `replay.bin` v2 + `meta.json`; `map.bsp` → python
+(`preprocess/src/main.rs`) → `replay.bin` v3 + `meta.json`; `map.bsp` → python
 tools (`tools/`) → `map.glb`; both are served by Vite and rendered by a
 three.js app (`web/`). Proven on one demo (`demo_upward1.dem`, pl_upward,
 837 s, 24 players, 228 kills, 4217 hit-scan shots). Repo:
 https://github.com/ea29ia/tf2-demo-viewer (public).
 
 ## Working (verified 2026-10-21 with the exact commands below)
+
+- **Health fix + replay.bin v3 (2026-10-22)**: player record `health` is now
+  `u16` (record 27 bytes, VERSION 3; writer, reader and validate.py agree).
+  Health sourcing fixed in the dumper: `player_hurt` event health overrides
+  stale out-of-PVS sendprops, dead players report 0 (sendprop reads 1), and a
+  respawn (dead->alive within 30 s of a known death) resets health to the
+  class base because PVS re-entry resurfaces a stale per-entity instance
+  baseline (same wrong constant after every respawn). Game events are
+  retransmitted in later packets; the hurt cursor now dedupes by content hash
+  and processes events at first sight. Audited with the new
+  `tools/health_audit.py` (class ids follow the parser's Class enum = TF2 ids;
+  respawn windows gated on kill events): dustbowl 223 OK / 2 mismatch,
+  upward 123 OK / 4 mismatch (residuals are stale resource class labels, not
+  wrong health). Verified: cargo build + dumps + validate.py OK on both demos,
+  `tsc --noEmit` + `npm run build` exit 0.
 
 - **Dumper signon/hurt fixes (2026-10-21)**: frame emission now starts at the
   first tick-0 packet (signon phase suppressed), fixing a backwards timeline on

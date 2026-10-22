@@ -6,16 +6,18 @@ import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 // The GLBs are Y-up, origin at the feet, Source-scale (~72 units tall).
 // Measured scout_red bbox: x [-10.6, 14.6], y [0, 67.5], z [-23.8, 29.4].
 
+// Order follows the dumper's parser enum (analyser::Class): scout, sniper,
+// soldier, demoman, medic, heavy, pyro, spy, engineer — NOT the wiki order.
 export const CLASS_NAMES = [
   'scout',
-  'soldier',
-  'pyro',
-  'demoman',
-  'heavy',
-  'engineer',
-  'medic',
   'sniper',
+  'soldier',
+  'demoman',
+  'medic',
+  'heavy',
+  'pyro',
   'spy',
+  'engineer',
 ] as const;
 
 export const TEAM_NAMES = ['red', 'blue'] as const;

@@ -9,7 +9,7 @@ export type CameraMode = 'free' | 'follow' | 'pov';
 
 export const BASE = import.meta.env.BASE_URL;
 export const REPLAY_URL = `${BASE}replay/replay.bin`;
-export const MAP_URL = `${BASE}maps/pl_upward.glb`;
+export const MAP_URL = `${BASE}maps/cp_dustbowl.glb`;
 
 export interface LoadedReplay {
   replay: Replay;

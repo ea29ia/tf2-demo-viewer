@@ -7,3 +7,4 @@ web/public/replay/*.bin
 *.log
 
 web/public/replay*/
+__pycache__/

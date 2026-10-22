@@ -15,11 +15,11 @@ import struct
 import sys
 
 MAGIC = b"TF2R"
-VERSION = 2
-RECORD_SIZE = 26
+VERSION = 3
+RECORD_SIZE = 27
 PROJ_RECORD_SIZE = 17
 HURT_RECORD_SIZE = 15
-RECORD = struct.Struct("<HBBBBfffff")
+RECORD = struct.Struct("<HBBBHfffff")
 
 
 def fail(message):
@@ -89,6 +89,8 @@ def parse(path):
                 fail(f"frame {index}: bad class {cls}")
             if flags & ~0x0F:
                 fail(f"frame {index}: unknown flag bits {flags:#x}")
+            if health > 1000:
+                fail(f"frame {index}: implausible health {health}")
             for value in (x, y, z, yaw, pitch):
                 if not math.isfinite(value):
                     fail(f"frame {index}: non-finite float")

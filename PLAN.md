@@ -39,22 +39,22 @@ Snapshot whenever `state.tick` changes. Include only players whose team is red/b
 }
 ```
 
-`replay.bin` (little endian), **version 2** (current):
+`replay.bin` (little endian), **version 3** (current):
 ```
 magic        4 bytes  "TF2R"
-version      u32      = 2
+version      u32      = 3
 meta_len     u32
 meta         meta_len bytes UTF-8 JSON (same content as meta.json)
 frame_count  u32
 frames[frame_count]:
   tick            u32
   player_count    u16
-  player_count records (26 bytes each):
+  player_count records (27 bytes each):
     entity   u16
     team     u8     2=red 3=blue
     class    u8     1..9 (scout..engineer), 0=other
     flags    u8     bit0 alive, bit1 in_pvs, bit2 disguised, bit3 stealthed
-    health   u8
+    health   u16    (v3: was u8 in v2; heavy spawns at 300 > 255)
     x,y,z    f32 x3   Source units
     yaw      f32      degrees (m_angEyeAngles[1])
     pitch    f32      degrees (m_angEyeAngles[0])
@@ -84,6 +84,12 @@ Notes:
   snapshot so the timeline is contiguous.
 - `startTick` in meta is `header.signon`; frames with tick > header.ticks
   (absolute sign-on ticks) are skipped.
+- Health sourcing (v3): `m_iHealth` sendprops only arrive for entities in the
+  recorder's PVS, so out-of-PVS players would freeze at a stale value. The
+  dumper overrides health with the victim's remaining health from global
+  `player_hurt` events whenever the event is more recent than the last observed
+  prop change; dead players are always reported 0 (the sendprop often still
+  reads 1 while dead).
 
 Acceptance: `dem2replay demo.dem out` exits 0; on `demo_upward1.dem`:
 55842 frames, max players 24, max projectiles 12; `validate.py` prints OK.

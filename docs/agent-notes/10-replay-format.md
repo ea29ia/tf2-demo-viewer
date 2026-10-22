@@ -1,15 +1,49 @@
-# Replay format (replay.bin v2)
+# Replay format (replay.bin v3)
 
-- Date: 2026-10-21
-- Author: lead agent
+- Date: 2026-10-22
+- Author: health-fix agent
 - Scope: `preprocess/src/main.rs`, `web/src/replay.ts`, `../PLAN.md`
-- Tags: #replay #format
+- Tags: #replay #format #health
 
 ## State
 
-Format v2 is implemented end-to-end and validated. `PLAN.md` documents v1; v2
-adds two blocks per frame (projectiles, hurts) after the player records. The
-writer is `preprocess/src/main.rs`, the only reader is `web/src/replay.ts`.
+Format v3 is implemented end-to-end and validated. Changes from v2:
+
+- Player record is **27 bytes** (was 26): `health` is now `u16` instead of
+  `u8`, inserted at offset +5; the five f32 fields (x/y/z/yaw/pitch) shift by
+  one byte. Heavy spawns at 300 HP which does not fit in a u8 (v2 data showed
+  every heavy clamped to 255).
+- `VERSION` bumped to 3 in writer, reader and `validate.py` (reader is strict:
+  it only accepts the version it ships with, matching what the writer emits).
+- The dumper now overrides sendprop-derived health with the victim's remaining
+  health from global `player_hurt` events when the event is more recent than
+  the last observed prop change, and reports 0 for dead players (the sendprop
+  often still reads 1 while dead).
+
+## Root-cause notes (health investigation, 2026-10-22)
+
+- `tf-demo-parser`'s `Class` enum matches TF2 class ids: scout 1, sniper 2,
+  soldier 3, demoman 4, medic 5, heavy 6, pyro 7, spy 8, engineer 9. An audit
+  that assumed `{2: soldier, 5: heavy, ...}` mislabels classes and produces
+  fake "wrong health" reports ("heavy plateau at 150" was actually a medic at
+  its correct base 150; verified against killfeed weapons: bazaar_bargain ->
+  sniper entity, crusaders_crossbow/ubersaw -> medic entity).
+- `m_iHealth` sendprops only arrive while the entity is in the recorder's PVS
+  (`entity.props()` yields only props present in the current delta). Players
+  outside the PVS keep the last in-PVS value (or 0 right after entity
+  creation), which looks like a frozen/wrong health plateau. In-PVS values are
+  exact: a throwaway instrumentation run compared raw prop arrivals against
+  `player_hurt` event health and they matched tick-for-tick for in-PVS
+  players.
+- `player_hurt` game events are global and carry the victim's remaining
+  health (`PlayerHurtEvent.health`), so they are the authoritative source for
+  damage-driven changes anywhere on the map. Healing (medic regen, dispensers)
+  still only observable via props while in PVS — residual staleness there is
+  inherent to the demo format.
+- Cargo fingerprints registry crates by content hash: editing the vendored
+  source under `~/.cargo/registry/src` does NOT trigger a rebuild. For
+  throwaway instrumentation, copy the crate and use a
+  `[patch.crates-io]` path dependency in a scratch project.
 
 ## Gotchas
 
@@ -34,6 +68,6 @@ writer is `preprocess/src/main.rs`, the only reader is `web/src/replay.ts`.
 
 ## Open questions
 
-- v3 will add a `shots` block (hit-scan rays) + headshot bit in hurt flags.
+- v4 will add a `shots` block (hit-scan rays) + headshot bit in hurt flags.
   Design is in `../TODO.txt` ("Sniper aim statistics"). Do it as one commit
-  touching writer + reader + PLAN.md, bump VERSION to 3.
+  touching writer + reader + PLAN.md, bump VERSION to 4.

@@ -18,16 +18,18 @@ export interface ClassInfo {
 
 export const OTHER_CLASS: ClassInfo = { abbr: 'OTH', name: 'Other', color: 0x9aa7b8 };
 
+// Class ids follow the dumper's parser enum order (tf-demo-parser analyser::Class),
+// NOT the TF2 wiki TF_CLASS_* order — verified against killfeed weapons (192:0).
 export const CLASSES: Record<number, ClassInfo> = {
   1: { abbr: 'SCO', name: 'Scout', color: 0x8fd14f },
-  2: { abbr: 'SOL', name: 'Soldier', color: 0x6f8cff },
-  3: { abbr: 'PYR', name: 'Pyro', color: 0xff8b3d },
+  2: { abbr: 'SNI', name: 'Sniper', color: 0xa7c46a },
+  3: { abbr: 'SOL', name: 'Soldier', color: 0x6f8cff },
   4: { abbr: 'DEM', name: 'Demoman', color: 0xc07bd8 },
-  5: { abbr: 'HEV', name: 'Heavy', color: 0xe0b04a },
-  6: { abbr: 'ENG', name: 'Engineer', color: 0xf2d05a },
-  7: { abbr: 'MED', name: 'Medic', color: 0x57d6c4 },
-  8: { abbr: 'SNI', name: 'Sniper', color: 0xa7c46a },
-  9: { abbr: 'SPY', name: 'Spy', color: 0xd9d9e3 },
+  5: { abbr: 'MED', name: 'Medic', color: 0x57d6c4 },
+  6: { abbr: 'HEV', name: 'Heavy', color: 0xe0b04a },
+  7: { abbr: 'PYR', name: 'Pyro', color: 0xff8b3d },
+  8: { abbr: 'SPY', name: 'Spy', color: 0xd9d9e3 },
+  9: { abbr: 'ENG', name: 'Engineer', color: 0xf2d05a },
 };
 
 export const CAPSULE_RADIUS = 16;

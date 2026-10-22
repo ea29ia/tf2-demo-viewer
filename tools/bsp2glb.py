@@ -298,12 +298,42 @@ def build(bsp: Bsp) -> MeshBuilder:
     disp_faces = 0
     fallback_faces = 0
 
-    # Stray 3D-skybox decals live far outside the playable world; including
-    # them would destroy the bounding box.  Drop a face only when all of its
-    # vertices are outside the sane map bounds.
+    # Stray 3D-skybox geometry lives far outside the playable world; including
+    # it would destroy the bounding box.  Use the worldspawn world_mins/maxs
+    # entity bounds when present (they exclude the 3D skybox by definition),
+    # falling back to generous hard constants.  Drop a face only when ALL of
+    # its vertices are outside the bounds (with a small margin for seams).
+    # Read worldspawn world_mins/world_maxs: the authoritative playable bounds
+    # that exclude 3D-skybox geometry (which sits far outside them).
+    def parse_world_bounds():
+        import re as _re
+        raw = bsp.lump(LUMP_ENTITIES).decode("utf-8", errors="replace")
+        def grab(key):
+            m = _re.search(r'"%s"\s+"(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)"' % key, raw)
+            return [float(m.group(i)) for i in (1, 2, 3)] if m else None
+        mins = grab("world_mins")
+        maxs = grab("world_maxs")
+        if mins and maxs:
+            return mins, maxs
+        return None
+
+    world_min = [-12000.0, -12000.0, -2500.0]
+    world_max = [12000.0, 12000.0, 3500.0]
+    _bounds = parse_world_bounds()
+    if _bounds:
+        _mins, _maxs = _bounds
+        # Intersect with the sane constants: some maps seal their 3D skybox
+        # inside worldspawn bounds (upward), so worldspawn alone is too wide;
+        # others (dustbowl) keep the skybox outside them, so worldspawn alone
+        # is the precise cut. The intersection handles both.
+        world_min = [max(a, b) for a, b in zip(world_min, _mins)]
+        world_max = [min(a, b) for a, b in zip(world_max, _maxs)]
+
     def outside_world(poly):
         for x, y, z in poly:
-            if -12000.0 <= x <= 12000.0 and -12000.0 <= y <= 12000.0 and -2500.0 <= z <= 3500.0:
+            if (world_min[0] - 64 <= x <= world_max[0] + 64
+                    and world_min[1] - 64 <= y <= world_max[1] + 64
+                    and world_min[2] - 64 <= z <= world_max[2] + 64):
                 return False
         return True
 
