@@ -1,10 +1,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
 
-// Real player models ("Civilian pose", static glTF, no skins).
-// The GLBs are Y-up, origin at the feet, Source-scale (~72 units tall).
-// Measured scout_red bbox: x [-10.6, 14.6], y [0, 67.5], z [-23.8, 29.4].
+// Real player models (converted from the local TF2 VPK install by
+// tools/mdl2glb.py — static glTF, bind pose, no skins).
+// Y-up, feet at y=0, ~80 units tall (measured scout bbox: 81.6).
 
 // Order follows the dumper's parser enum (analyser::Class): scout, sniper,
 // soldier, demoman, medic, heavy, pyro, spy, engineer — NOT the wiki order.
@@ -37,11 +36,7 @@ const templates = new Map<string, PlayerModelTemplate | null>();
 const pending = new Map<string, Promise<PlayerModelTemplate | null>>();
 const warned = new Set<string>();
 
-const draco = new DRACOLoader();
-draco.setDecoderPath('https://www.gstatic.com/draco/versioned/decoders/1.5.7/');
-
 const loader = new GLTFLoader();
-loader.setDRACOLoader(draco);
 
 const BASE = import.meta.env.BASE_URL;
 

@@ -105,15 +105,23 @@ class Mdl:
             models = []
             for m in range(nummodels):
                 mo = bp + modelindex + m * 96
+                if mo + 96 > len(data):
+                    break  # trailing padding models, garbage fields
                 mname = data[mo:mo + 64].split(b"\0")[0].decode("latin-1")
                 nummeshes = i(mo + 72)
-                meshoff = i(mo + 76)
                 numvertices = i(mo + 80)
+                if nummeshes <= 0 or numvertices <= 0:
+                    continue  # empty LOD placeholder model
+                if mo + 72 + nummeshes * 116 > len(data):
+                    continue  # implausible mesh count
+                meshoff = i(mo + 76)
                 vertexindex = i(mo + 84)  # byte offset into the vvd pool
                 tangentsindex = i(mo + 88)  # byte offset into tangent pool
                 meshes = []
                 for me in range(nummeshes):
                     e = mo + meshoff + me * 116
+                    if e + 116 > len(data):
+                        break
                     meshes.append({
                         "material": i(e),
                         "numvertices": i(e + 8),
@@ -304,6 +312,27 @@ class Textures:
         self.tex = vpk.Vpk(os.path.join(tf_dir, "tf2_textures_dir.vpk"))
         self.cache: dict[str, tuple[int, int, bytes] | None] = {}
 
+    def resolve_material(self, name: str) -> str | None:
+        """Resolve a texture/material name to a full VMT path in the VPK.
+
+        Bare names (no '/') live next to their .mdl, but the directory does
+        not always match the model path (heavy's materials are in
+        models/player/hvyweapon), so fall back to a VPK-wide search.
+        """
+        if name.startswith("models/"):
+            return "materials/" + name + ".vmt"
+        direct = [
+            "materials/" + name + ".vmt",
+            "materials/models/" + name + ".vmt",
+        ]
+        for cand in direct:
+            if self.misc.exists(cand):
+                return cand
+        suffix = "/" + name + ".vmt"
+        hits = [k for k in self.misc.entries
+                if k.startswith("materials/models/player/") and k.endswith(suffix)]
+        return hits[0] if len(hits) == 1 else (hits[0] if hits else None)
+
     def vmt_basetexture(self, material_path: str) -> str | None:
         try:
             text = self.misc.read(material_path).decode("utf-8", errors="replace")
@@ -360,8 +389,15 @@ def write_glb(path: str, gltf: dict, bin_blob: bytes) -> None:
 
 
 def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
-              skin: list[int], name: str) -> tuple[dict, bytes]:
-    """Build one GLB. Returns (gltf_json, binary). All coords are Y-up."""
+              skin: list[int], name: str,
+              model_dir: str | None = None) -> tuple[dict, bytes]:
+    """Build one GLB. Returns (gltf_json, binary).
+
+    Source model space (from the VVD) is right-handed with up = +y, forward
+    = +z, left = +x. glTF is Y-up and the viewer expects the model to face
+    its local +x (rotation.y = player yaw), so the mapping is
+    (x, y, z) -> (z, y, -x)  (forward -> +x, left -> -z).
+    """
     positions: list[float] = []
     normals: list[float] = []
     uvs: list[float] = []
@@ -383,13 +419,10 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
         tex_name = mdl.texture_names[tex_index]
         # Bare texture names (no path) are relative to the model's own
         # material directory; derive that from a fully qualified sibling.
-        if "/" not in tex_name:
-            for other in mdl.texture_names:
-                if "/" in other:
-                    tex_name = other.rsplit("/", 1)[0] + "/" + tex_name
-                    break
-        vmt = "materials/" + tex_name + ".vmt"
-        base = textures.vmt_basetexture(vmt) or tex_name
+        vmt = textures.resolve_material(tex_name)
+        base = textures.vmt_basetexture(vmt) if vmt else None
+        if base is None:
+            base = tex_name
         img = textures.load(base)
         if img is None:
             return None
@@ -429,8 +462,8 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
                 vstart = len(positions) // 3
                 for k in range(count):
                     pos, nrm, uv = vvd.vertex(base + k)
-                    positions.extend(pos)
-                    normals.extend(nrm)
+                    positions.extend((pos[2], pos[1], -pos[0]))
+                    normals.extend((nrm[2], nrm[1], -nrm[0]))
                     uvs.extend(uv)
                 tris = mesh_tris[me]["strips"] if me < len(mesh_tris) else []
                 valid = []
@@ -636,7 +669,8 @@ def main(argv: list[str]) -> int:
             print(f"no skin family {family}; skipping {team}", file=sys.stderr)
             continue
         gltf, blob = build_glb(mdl, vvd, vtx_lod, textures,
-                               mdl.skins[family], f"{model_name}_{team}")
+                               mdl.skins[family], f"{model_name}_{team}",
+                               model_dir=model_name)
         out = f"{out_prefix}_{team}.glb"
         write_glb(out, gltf, blob)
         n_tri = sum(
