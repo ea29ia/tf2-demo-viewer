@@ -308,8 +308,10 @@ class Vtx:
 # ---------------------------------------------------------------------------
 class Textures:
     def __init__(self, tf_dir: str):
-        self.misc = vpk.Vpk(os.path.join(tf_dir, "tf2_misc_dir.vpk"))
-        self.tex = vpk.Vpk(os.path.join(tf_dir, "tf2_textures_dir.vpk"))
+        # Works with real VPK sets or a loose extracted directory tree
+        # (vpk.open_pack picks whichever is available).
+        self.misc = vpk.open_pack(tf_dir, "tf2_misc")
+        self.tex = vpk.open_pack(tf_dir, "tf2_textures")
         self.cache: dict[str, tuple[int, int, bytes] | None] = {}
 
     def resolve_material(self, name: str, model_dir: str | None = None) -> str | None:
@@ -682,7 +684,7 @@ def main(argv: list[str]) -> int:
         return 2
     tf_dir, model_name, out_prefix = argv[1], argv[2], argv[3]
 
-    misc = vpk.Vpk(os.path.join(tf_dir, "tf2_misc_dir.vpk"))
+    misc = vpk.open_pack(tf_dir, "tf2_misc")
     mdl_data = misc.read(f"{model_name}.mdl")
     vvd_data = misc.read(f"{model_name}.vvd")
     try:

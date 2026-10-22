@@ -110,6 +110,50 @@ class Vpk:
         return sorted(p for p in self.entries if needle in p)
 
 
+class LoosePack:
+    """Reads files from a plain directory tree (the layout used by the
+    offline extraction in ~/Documents/tf2/tf). Same interface as Vpk:
+    `entries` maps path -> entry tuple (archive field is 0x7FFF),
+    `read`/`exists`/`find` behave like the VPK equivalents."""
+
+    DIR_ARCHIVE = 0x7FFF
+
+    def __init__(self, root: str):
+        self.root = root
+        self.entries: dict[str, tuple[int, int, int, int, int]] = {}
+        self.preload: dict[str, bytes] = {}
+        for base, _dirs, files in os.walk(root):
+            for fn in files:
+                full = os.path.join(base, fn)
+                rel = os.path.relpath(full, root).replace(os.sep, "/").lower()
+                size = os.path.getsize(full)
+                self.entries[rel] = (0, 0, self.DIR_ARCHIVE, 0, size)
+
+    def read(self, path: str) -> bytes:
+        key = path.lower().replace("\\", "/")
+        entry = self.entries.get(key)
+        if entry is None:
+            raise VpkError(f"not in pack: {path}")
+        with open(os.path.join(self.root, key), "rb") as f:
+            return f.read()
+
+    def exists(self, path: str) -> bool:
+        return path.lower().replace("\\", "/") in self.entries
+
+    def find(self, substring: str) -> list[str]:
+        needle = substring.lower()
+        return sorted(p for p in self.entries if needle in p)
+
+
+def open_pack(tf_dir: str, name: str):
+    """Open `<tf_dir>/<name>_dir.vpk` when present, else the loose
+    directory tree `<tf_dir>` (offline extraction)."""
+    dir_path = os.path.join(tf_dir, name + "_dir.vpk")
+    if os.path.exists(dir_path):
+        return Vpk(dir_path)
+    return LoosePack(tf_dir)
+
+
 def main(argv: list[str]) -> int:
     if len(argv) < 3:
         print("usage: vpk.py <dir.vpk> list [substring] | extract <path> <out>", file=sys.stderr)
