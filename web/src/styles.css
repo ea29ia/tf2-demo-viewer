@@ -260,6 +260,21 @@ html, body, #app {
 .p-hp { font-variant-numeric: tabular-nums; font-size: 11px; color: #b9c6d6; }
 
 .killfeed-card { flex: 0 0 auto; }
+
+/* Floating killfeed in the viewport's top-right corner (game-style overlay) */
+.killfeed-overlay {
+  position: absolute;
+  top: 14px;
+  right: 16px;
+  z-index: 4;
+  max-width: 420px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(10, 14, 19, 0.66);
+  backdrop-filter: blur(7px);
+  pointer-events: none;
+}
 .killfeed { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; min-height: 26px; }
 .killfeed li {
   display: flex;

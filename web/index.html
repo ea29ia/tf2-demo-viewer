@@ -11,7 +11,11 @@
   </head>
   <body>
     <div id="app">
-      <div id="viewport"></div>
+      <div id="viewport">
+        <div id="killfeedOverlay" class="killfeed-overlay">
+          <ul id="killfeed" class="killfeed"></ul>
+        </div>
+      </div>
 
       <aside id="sidebar">
         <button
@@ -73,7 +77,7 @@
           <div id="players" class="players"></div>
         </section>
 
-        <section class="card killfeed-card">
+        <section class="card killfeed-card hidden">
           <div class="card-title"><span data-i18n="killfeedTitle">Killfeed</span><span class="muted" data-i18n="killfeedSub">последние 8</span></div>
           <ul id="killfeed" class="killfeed"></ul>
         </section>

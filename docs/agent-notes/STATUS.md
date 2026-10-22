@@ -120,3 +120,22 @@ cd web && npx tsc --noEmit && npm run build
   curl works, git push over ssh works. Create/edit repos via curl + API.
 - Valve assets are gitignored (`.bsp`, `.glb`, `replay.bin`, player model
   glbs). Only code and small data (kits.json) are committed.
+
+## Session update — 2026-10-22 (later)
+
+- Killfeed moved out of the sidebar into a floating overlay at the viewport's
+  top-right corner (`.killfeed-overlay`, game-style; sidebar card hidden,
+  `#killfeed` element unchanged so `renderKillfeed` needed no changes).
+- New map toggles in the sidebar: mesh wireframe (material.wireframe on all
+  map+foliage meshes) and prop bounding-box wireframe overlay (one merged
+  `LineSegments` built from GLB extras in `inspect.buildPropBoxOverlay`,
+  ~1272 boxes, single draw call, AABB-only — GLB extras don't store prop yaw).
+- `tools/bsp2glb.py`: out-of-world face culling now intersects worldspawn
+  `world_mins/world_maxs` with the old sane constants (some maps seal their
+  3D skybox inside worldspawn bounds — upward; others place it outside —
+  dustbowl). Both maps validate PASS.
+- Second demo supported end-to-end: `demo_dustbowl1.dem` (cp_dustbowl,
+  110842 frames, 24 players, 391 kills) dumped + validated; GLB built from
+  fastdl bsp; `MAP_URL` currently points at cp_dustbowl.glb (upward replay
+  kept in web/public/replay/backup_upward/, not in git).
+- Click-to-inspect still broken (user reports clicks don't fire); deferred.
