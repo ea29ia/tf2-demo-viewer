@@ -165,6 +165,23 @@ def main(argv) -> int:
     data, _version = probe.decompress_sprp(bsp)
     names, _leaf_count, prop_count, entry = probe.parse(data)
 
+    # Playable-world bounds (same rule as bsp2glb.py): worldspawn
+    # world_mins/world_maxs intersected with sane constants. 3D-skybox props
+    # live far outside these bounds and must not be drawn as world geometry.
+    import re
+    world_min = [WORLD[0], WORLD[2], WORLD[4]]
+    world_max = [WORLD[1], WORLD[3], WORLD[5]]
+    entities = bsp.lump(probe.m.LUMP_ENTITIES).decode("utf-8", errors="replace")
+
+    def grab_bound(key):
+        match = re.search(r'"%s"\s+"(-?[\d.]+)\s+(-?[\d.]+)\s+(-?[\d.]+)"' % key, entities)
+        return [float(match.group(i)) for i in (1, 2, 3)] if match else None
+
+    mins, maxs = grab_bound("world_mins"), grab_bound("world_maxs")
+    if mins and maxs:
+        world_min = [max(a, b) for a, b in zip(world_min, mins)]
+        world_max = [min(a, b) for a, b in zip(world_max, maxs)]
+
     gltf, bin_blob = load_glb(glb_path)
     prim = gltf["meshes"][0]["primitives"][0]
     positions = read_f32(gltf, bin_blob, prim["attributes"]["POSITION"])
@@ -244,8 +261,9 @@ def main(argv) -> int:
             skipped += 1
             continue
         # Skip props that would blow up the bounding box (3D skybox props).
-        if not (WORLD[0] <= ox <= WORLD[1] and WORLD[2] <= oy <= WORLD[3]
-                and WORLD[4] <= oz <= WORLD[5]):
+        if not (world_min[0] - 64 <= ox <= world_max[0] + 64
+                and world_min[1] - 64 <= oy <= world_max[1] + 64
+                and world_min[2] - 64 <= oz <= world_max[2] + 64):
             skipped += 1
             continue
         sx, sy, h = size_for(name)

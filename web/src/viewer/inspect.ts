@@ -40,10 +40,15 @@ function propLabel(name: string): string {
   return '';
 }
 
-export function collectPropEntries(root: THREE.Object3D): number {  propEntries = [];
+export function collectPropEntries(root: THREE.Object3D): number {
+  propEntries = [];
   root.traverse((obj) => {
-    const extras = (obj.userData as { extras?: { props?: unknown[] } }).extras;
-    const props = extras?.props;
+    // GLTFLoader merges glTF `node.extras` into object.userData (see
+    // assignExtrasToUserData in GLTFLoader), so props live at userData.props,
+    // not under a nested `extras` key. Keep the nested read for files written
+    // by older tooling.
+    const data = obj.userData as { props?: unknown[]; extras?: { props?: unknown[] } };
+    const props = data.props ?? data.extras?.props;
     if (!Array.isArray(props)) return;
     for (const raw of props) {
       const e = raw as { n?: string; p?: number[]; s?: number[] };

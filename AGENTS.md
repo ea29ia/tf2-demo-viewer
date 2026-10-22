@@ -49,17 +49,22 @@ viewer/
    converted in `collectPropEntries`.
 5. **No Valve assets in git.** `.bsp`, `.glb`, `replay.bin` are gitignored; commit
    only code and small data (kits.json is fine — it's coordinates).
-6. **Windows/paths:** the dev box is aarch64 Android (Termux). Rust builds need
-   `preprocess/.cargo/config.toml` (clang linker + `-L/system/lib64`) — already set;
-   do not remove it.
+6. **Windows/paths:** two dev boxes are in use. The aarch64 Android (Termux)
+   box needs `preprocess/.cargo/config.toml` (clang linker + `-L/system/lib64`)
+   — already set; do not remove it (it only matches the
+   `aarch64-linux-android` target, so it is inert on the x86_64 Linux desktop,
+   which has Node/Rust installed under `~/.local/node` and `~/.cargo`).
+   On the desktop, TF2 is installed under
+   `~/.steam/debian-installation/steamapps/common/Team Fortress 2`, so maps,
+   demos and VPKs are available locally.
 
 ## Regeneration recipes
 
 Map GLB from scratch:
 ```
 python3 tools/bsp2glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
-python3 tools/add_props_glb.py web/public/maps/pl_upward.glb assets/pl_upward.bsp
-python3 tools/add_kits_glb.py web/public/maps/pl_upward.glb
+python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
+python3 tools/add_kits_glb.py web/public/maps/pl_upward.glb web/public/maps/kits.json
 python3 tools/validate_glb.py web/public/maps/pl_upward.glb
 ```
 

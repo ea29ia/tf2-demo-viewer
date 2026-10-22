@@ -115,7 +115,9 @@ cd web && npx tsc --noEmit && npm run build
 ## Environment quirks (do not rediscover)
 
 - aarch64-android (Termux/proot): Rust needs `preprocess/.cargo/config.toml`
-  (clang linker + `-L/system/lib64`) — present, do not remove.
+  (clang linker + `-L/system/lib64`) — present, do not remove it (inert on
+  x86_64 because it is target-scoped). The x86_64 desktop has Node in
+  `~/.local/node/bin` and Rust in `~/.cargo/bin`, and a local TF2 install.
 - `gh` CLI cannot reach api.github.com (Go TLS handshake timeout, likely DPI);
   curl works, git push over ssh works. Create/edit repos via curl + API.
 - Valve assets are gitignored (`.bsp`, `.glb`, `replay.bin`, player model
@@ -139,3 +141,33 @@ cd web && npx tsc --noEmit && npm run build
   fastdl bsp; `MAP_URL` currently points at cp_dustbowl.glb (upward replay
   kept in web/public/replay/backup_upward/, not in git).
 - Click-to-inspect still broken (user reports clicks don't fire); deferred.
+
+## Session update — 2026-10-22 (evening, x86_64 desktop)
+
+- **Environment changed**: this session runs on x86_64 Linux (not the Termux
+  aarch64 box). Node 24 and Rust 1.99 were installed locally (`~/.local/node`,
+  `~/.cargo`); `preprocess/.cargo/config.toml` only targets
+  `aarch64-linux-android`, so it does not affect this host.
+- **Valve assets available locally**: TF2 is installed at
+  `~/.steam/debian-installation/steamapps/common/Team Fortress 2` with
+  `tf/maps/*.bsp`, all `tf2_*.vpk` files and demo recordings
+  (`tf/demp.dem`, `demp_2.dem`, `pocket.dem`, `pocket1.dem`, `fix.dem`).
+  This unblocks the VPK-dependent TODO items (real player/prop meshes,
+  map textures, vanilla pyro) — needs user go-ahead before starting.
+- **Assets regenerated** from `tf/demp.dem` (pl_upward, 1434 s, 95349 frames,
+  24 players, 487 kills) and from the local `pl_upward.bsp`:
+  - `replay.bin` 64 MB, `validate.py` → OK.
+  - map GLB 4.38 MiB, 79056 triangles, 1182 prop entries + 30 kits,
+    `validate_glb.py` → PASS; bbox now x[-3072, 4100.6] (no more skybox props).
+  - `state.ts` `MAP_URL` back to `maps/pl_upward.glb` (was cp_dustbowl).
+- **Bugs fixed (verified in a real browser tab)**:
+  - Click-inspect loaded 0 props: GLTFLoader merges `node.extras` into
+    `object.userData`, so the code must read `userData.props`, not
+    `userData.extras.props`. Now logs `[inspect] prop entries loaded: 1212`;
+    synthetic clicks returned barrels, rails, fences, boulders, lights.
+  - 3D-skybox props were included in the GLB (bbox max x 8898, floating boxes
+    far from the map). `add_props_glb.py` now culls against worldspawn
+    world_mins/maxs intersected with the sane constants, like bsp2glb.py.
+- **Verified commands**: `cargo build --release` OK; dumper OK;
+  `validate.py` OK; `tools/validate_glb.py` PASS; `npx tsc --noEmit` exit 0;
+  `npm run build` exit 0. Dev server on http://127.0.0.1:5173.
