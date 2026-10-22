@@ -158,7 +158,6 @@ cd web && npx tsc --noEmit && npm run build
   removed after use — re-add temporarily if scene forensics is needed again.
 
 ## Session update — 2026-10-22 (night): VPK player models shipped
-
 - **All 9 classes × 2 teams exported from the local VPKs** into
   `web/public/models/players/` (18 GLBs, ~9 MB total, gitignored — rebuild
   with `tools/mdl2glb.py <tf_dir> models/player/<class> web/public/models/players/<class>`,
@@ -217,3 +216,22 @@ cd web && npx tsc --noEmit && npm run build
 - **Verified commands**: `cargo build --release` OK; dumper OK;
   `validate.py` OK; `tools/validate_glb.py` PASS; `npx tsc --noEmit` exit 0;
   `npm run build` exit 0. Dev server on http://127.0.0.1:5173.
+
+## Session update — 2026-10-22 (late night): ROOT CAUSE of broken textures found
+
+- **vtf.py decoded the wrong mip.** VTF stores the mip chain smallest-first;
+  mip 0 (full res) is the LAST mip_size bytes of the image data. We read from
+  the start (thumbnails + head of bigger mips) → spatially scrambled texture
+  for every material. Decisive test: box-2x2 downscale of decoded mip0 vs
+  decoded mip1 — mean|diff| 1.0 after fix vs 41.4 before. After the fix the
+  medic face verts sample skin (59-70% skin-rate, avg (167,102,75)); before:
+  5%, avg (28,27,28). All 18 player GLBs regenerated (commit 706c28b).
+- **mdl2glb.py: winding fix** (f03389e): Source VTX strips are D3D CW;
+  glTF needs CCW — emit (a,c,b). Verified: geometric-vs-vertex normal
+  agreement 3129/3139 on the medic head after fix (was 10/3139).
+- **web: forced TextureLoader path** (71108fd): `window.createImageBitmap =
+  undefined` before GLTFLoader in playerModels.ts + modelview.html —
+  ImageBitmapLoader ignores texture.flipY at upload; browser orientation
+  disagreements mirror islands. tsc + vite build exit 0.
+- User to verify visually in Firefox; [dbg] console.log still in
+  modelview.html — remove after confirmation.

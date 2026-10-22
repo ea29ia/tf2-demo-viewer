@@ -63,3 +63,20 @@ build again emits slivers the count RISES, so the low threshold still
 catches catastrophic under-generation. Diagnostics worth keeping: raycast
 via headless chromium + triangle-level AABB scan of the scene mesh (see
 /tmp/opencode/needles.py pattern in the 40- note if needed).
+
+## 2026-10-22: VTF mip order was the root cause of "wrong textures"
+- VTF mip chain is stored smallest-first; mip 0 = LAST mip_size bytes of
+  image data. vtf.py used to read from the start (thumbnails + head of
+  larger mips) producing a scrambled image. Decisive test: downscale
+  mip0 by 2 and compare with mip1 — mean|diff| 1.0 (correct order) vs
+  41.4 (old order). After the fix, medic face verts sample skin (59-70%
+  skin-rate, avg (167,102,75)); before: 5%, avg (28,27,28).
+- Consequence: earlier UV-flip A/B conclusions were computed against
+  corrupted textures and should not be trusted; no V flip is needed
+  (D3D top-left origin = glTF).
+- Also fixed same day: D3D CW -> glTF CCW winding flip in mdl2glb
+  (geometric vs vertex normal agreement 3129/3139 after fix).
+- Web: window.createImageBitmap=undefined before GLTFLoader forces the
+  TextureLoader path (ImageBitmapLoader ignores texture.flipY at upload;
+  browser orientation disagreements mirror islands). [dbg] log still in
+  modelview.html — remove when confirmed.
