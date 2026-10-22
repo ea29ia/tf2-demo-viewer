@@ -21,7 +21,8 @@ the game.
 
 - `pl_upward` (and other Source BSP v20 maps) rendered from brush geometry,
   displacements and static props — vertex-colored, flat-shaded, real-time shadows.
-- Players as team-colored capsules (red/blue) with name, HP, class and view-direction
+- Players as real player models (team-colored, GLB meshes from TF2 VPKs; simple
+  capsules are only a fallback) with name, HP, class and view-direction
   arrows; spies are purple with a true-team ring when disguised.
 - Rockets, pipes, stickies, flares flying and exploding with splash-radius rings.
 - In-game style damage numbers (crits in yellow).
@@ -39,7 +40,7 @@ map.bsp ──(tools: python, stdlib)──► map.glb
 ```
 
 All heavy lifting happens once, offline. The browser gets a compact tick-by-tick
-replay (~35 MB) and a lightweight GLB map (~4.5 MB).
+replay (~64 MB) and a lightweight GLB map (~4.5 MB).
 
 ## Quick start
 
@@ -49,13 +50,13 @@ Requirements: Rust, Python 3, Node.js, and a `pl_upward.bsp` (see `tools/get_map
 # 1. Replay data from a demo file
 cd preprocess && cargo build --release
 ./target/release/dem2replay /path/to/demo.dem ../web/public/replay
-python3 validate.py ../web/public/replay/replay.bin
+python3 validate.py ../web/public/replay/replay.bin ../web/public/replay/meta.json
 
 # 2. Map geometry
 cd ..
 python3 tools/bsp2glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
-python3 tools/add_props_glb.py web/public/maps/pl_upward.glb assets/pl_upward.bsp
-python3 tools/add_kits_glb.py web/public/maps/pl_upward.glb
+python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
+python3 tools/add_kits_glb.py web/public/maps/pl_upward.glb web/public/maps/kits.json
 python3 tools/validate_glb.py web/public/maps/pl_upward.glb
 
 # 3. Serve
@@ -79,9 +80,12 @@ UI is available in Russian and English (toggle in the panel header).
 
 ## Status
 
-MVP, works end-to-end on one demo (`demo_upward1.dem`, pl_upward, ~14 min,
-24 players). See `TODO.txt` for the roadmap — cart animation, real player models,
-map textures, in-browser WASM parsing are the big items.
+Works end-to-end on two demos: `demo_upward1.dem` (pl_upward, ~24 min, 24
+players, 487 kills) and `demo_dustbowl1.dem` (cp_dustbowl, 24 players, 391
+kills). Real player models (18 GLBs
+from TF2 VPKs) are shipped — capsules are only a fallback. See `TODO.txt` for the
+roadmap — cart animation, prop meshes, map textures, in-browser WASM parsing and
+kit pickup states are the big items.
 
 ## Legal note
 

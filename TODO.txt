@@ -10,10 +10,16 @@
   вагонетки по path_track, окраска в цвет команды-владельца.
 
 ## Реальные модели игроков
-- Вместо капсул — настоящие модели (MDL+VVD+VTX, анимации из m_nSequence).
+- ~~Вместо капсул — настоящие модели~~ (выполнено 2026-10-22: все 9 классов × 2
+  команды экспортированы из локальных VPK в web/public/models/players/ — 18 GLB,
+  через tools/mdl2glb.py).
+- Осталось: анимации игроков (проигрывание m_nSequence; сейчас модели — статичные
+  меши, sequence/cycle не пишется в replay.bin).
 
 ## Текстуры карты
 - VTF/VMT текстуры и lightmap вместо vertex colors.
+- Примечание: декодер VTF уже есть в tools/vtf.py (порядок mip исправлен),
+  можно переиспользовать для текстур карты.
 
 ## WASM-парсер в браузере
 - Разбор .dem прямо в браузере (drag-and-drop без препроцессинга).
@@ -35,26 +41,17 @@
 - Все пропы — боксы; камни (boulder_*) выглядят как квадраты, в игре они сложной
   формы.
 - Сделать: рендер настоящих MDL-мешей (mdl+vvd+vtx → glTF), кэш моделей по имени,
-  instancing для повторяющихся пропов. Требует доступ к VPK-ассетам TF2 — fastdl
-  не отдаёт VPK; нужен SteamCMD, локальная установка или зеркала.
-
-## Pyro model is robo-pyro (MvM)
-- The glb set from dribble.tf ships a robotic pyro (MvM skin) instead of the
-  vanilla one. Visible as "robo-pyro" in the test scene.
-- TODO: replace with vanilla pyro mesh. Sources tried: dribble.tf master/dev
-  (same file), Sketchfab (requires OAuth for downloadable models), models-resource
-  (blocks bots). Best path: extract from a real TF2 VPK once we have SteamCMD or
-  a local install (same dependency as the "real prop meshes" item).
+  instancing для повторяющихся пропов. Разблокировано: есть локальная установка
+  TF2 (и офлайн-копия в ~/Documents/tf2/ с tools/vpk.py LoosePack); нужен
+  экспортёр пропов по образцу tools/mdl2glb.py.
 
 ## Player model pose (arms look like holding a weapon)
-- The glTF dumps from dribble.tf are static meshes with NO bones, baked in the
-  game's c_idle_01 pose (weapon-ready). A true "civilian pose" (arms down)
-  cannot be achieved without re-rigging in Blender (models have no skeleton).
-- Also confirmed: their pyro is the MvM bot pyro (materials = pyro_bot_*), not
-  the player pyro.
-- Real fix: extract MDLs from a TF2 install/VPK, re-pose or load with bones and
-  play actual animations (see "player models" and "prop meshes" items). All
-  roads lead to needing TF2 game files (SteamCMD or local install).
+- Models are now exported from a real TF2 install (tools/mdl2glb.py), but they
+  are still static meshes with NO bones: the pose (weapon-ready arms) is baked
+  into the mesh, and there are no animations.
+- Remaining fix: re-rig in Blender or export bones from the MDL, then play
+  actual animations (see the "player animations (m_nSequence)" item under
+  "Реальные модели игроков").
 
 ## Sniper aim statistics (hit-scan accuracy analysis)
 Idea: for every hit-scan shot fired by a sniper (or any class), reconstruct the

@@ -104,8 +104,8 @@ python3 validate.py ../web/public/replay/replay.bin ../web/public/replay/meta.js
 
 # tools or map changed:
 python3 tools/bsp2glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
-python3 tools/add_props_glb.py web/public/maps/pl_upward.glb assets/pl_upward.bsp
-python3 tools/add_kits_glb.py web/public/maps/pl_upward.glb
+python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
+python3 tools/add_kits_glb.py web/public/maps/pl_upward.glb web/public/maps/kits.json
 python3 tools/validate_glb.py web/public/maps/pl_upward.glb                          # → PASS
 
 # web changed:
