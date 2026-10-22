@@ -36,6 +36,12 @@ const templates = new Map<string, PlayerModelTemplate | null>();
 const pending = new Map<string, Promise<PlayerModelTemplate | null>>();
 const warned = new Set<string>();
 
+// Force the plain TextureLoader path inside GLTFLoader: with the default
+// ImageBitmapLoader path, texture.flipY is ignored at upload and browsers
+// disagree on bitmap decode orientation, which mirrors texture content
+// inside UV islands on Firefox. TextureLoader honors flipY=false uniformly.
+(window as { createImageBitmap?: unknown }).createImageBitmap = undefined;
+
 const loader = new GLTFLoader();
 
 const BASE = import.meta.env.BASE_URL;
