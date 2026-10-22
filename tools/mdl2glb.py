@@ -486,7 +486,10 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
                     pos, nrm, uv = vvd.vertex(base + k)
                     positions.extend((pos[2], pos[1], -pos[0]))
                     normals.extend((nrm[2], nrm[1], -nrm[0]))
-                    uvs.extend((uv[0], 1.0 - uv[1]))
+                    # Source is D3D-based: UV origin is top-left, v grows downward
+                    # — the same convention glTF uses. No V flip (verified against
+                    # medic head: face texels bright only with row = v*h).
+                    uvs.extend(uv)
                 tris = mesh_tris[me]["strips"] if me < len(mesh_tris) else []
                 valid = []
                 max_v = count - 1
