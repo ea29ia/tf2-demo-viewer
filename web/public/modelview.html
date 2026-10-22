@@ -12,7 +12,10 @@
 <script type="importmap">{"imports": {"three": "/node_modules/three/build/three.module.js"}}</script>
 </head>
 <body>
-<div id="hud">drag: orbit | wheel: zoom | F: flip V | R: toggle rotation</div>
+<div id="hud">
+  <div>drag: orbit | wheel: zoom | R: rotation</div>
+  <button id="flipBtn" style="margin-top:6px;font:14px monospace;padding:10px 16px;">Flip V</button>
+</div>
 <script type="module">
 import * as THREE from 'three';
 import { GLTFLoader } from '/node_modules/three/examples/jsm/loaders/GLTFLoader.js';
@@ -78,19 +81,27 @@ addEventListener('wheel', e => {
   updateCam();
 }, { passive: true });
 addEventListener('keydown', e => {
-  const k = e.key.toLowerCase();
-  if (k === 'f') {
-    // toggle UV v-flip live by remapping the texture matrix
-    for (const m of meshes) {
-      const mat = Array.isArray(m.material) ? m.material : [m.material];
-      for (const mm of mat) {
-        if (mm.map) mm.map.matrixAutoUpdate = true;
-        if (mm.map) { mm.map.flipY = !mm.map.flipY; mm.map.needsUpdate = true; }
-      }
+  if (e.key.toLowerCase() === 'f') flipV();
+  if (e.key.toLowerCase() === 'r') state.spin = !state.spin;
+});
+
+function flipV() {
+  for (const m of meshes) {
+    const mat = Array.isArray(m.material) ? m.material : [m.material];
+    for (const mm of mat) {
+      if (mm.map) { mm.map.flipY = !mm.map.flipY; mm.map.needsUpdate = true; }
     }
-    hud.textContent = 'flipped UV V (' + (meshes[0]?.material.map.flipY ? 'flipY on' : 'flipY off') + ')';
   }
-  if (k === 'r') state.spin = !state.spin;
+  const fy = meshes[0]?.material?.map?.flipY;
+  hud.querySelector('span#flipState')?.remove();
+  const s = document.createElement('span');
+  s.id = 'flipState';
+  s.textContent = ' · V ' + (fy ? 'flipped' : 'normal');
+  hud.querySelector('div').appendChild(s);
+}
+document.getElementById('flipBtn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  flipV();
 });
 
 const hud = document.getElementById('hud');
