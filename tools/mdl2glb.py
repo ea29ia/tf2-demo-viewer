@@ -476,7 +476,7 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
                     pos, nrm, uv = vvd.vertex(base + k)
                     positions.extend((pos[2], pos[1], -pos[0]))
                     normals.extend((nrm[2], nrm[1], -nrm[0]))
-                    uvs.extend(uv)
+                    uvs.extend((uv[0], 1.0 - uv[1]))
                 tris = mesh_tris[me]["strips"] if me < len(mesh_tris) else []
                 valid = []
                 max_v = count - 1

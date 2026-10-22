@@ -1,0 +1,110 @@
+<!doctype html>
+<!-- Standalone model orbit viewer: /modelview.html?cls=soldier&team=red
+     Left-drag orbits, wheel zooms, V flips the texture V coordinate (debug). -->
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { margin: 0; background: #1a2230; overflow: hidden; }
+  canvas { display: block; }
+  #hud { position: fixed; top: 10px; left: 10px; color: #cfe; font: 13px monospace; user-select: none; }
+</style>
+<script type="importmap">{"imports": {"three": "/node_modules/three/build/three.module.js"}}</script>
+</head>
+<body>
+<div id="hud">drag: orbit | wheel: zoom | F: flip V | R: toggle rotation</div>
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from '/node_modules/three/examples/jsm/loaders/GLTFLoader.js';
+
+const q = new URLSearchParams(location.search);
+const cls = q.get('cls') || 'soldier';
+const team = q.get('team') || 'red';
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(window.innerWidth, window.innerHeight);
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x1a2230);
+scene.add(new THREE.HemisphereLight(0xffffff, 0x404048, 2.4));
+const sun = new THREE.DirectionalLight(0xffffff, 2.0);
+sun.position.set(150, 300, 350);
+scene.add(sun);
+const back = new THREE.DirectionalLight(0xffffff, 0.8);
+back.position.set(-100, 150, -250);
+scene.add(back);
+
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 4000);
+
+const state = { yaw: Math.PI * 0.15, pitch: 0.1, dist: 220, target: new THREE.Vector3(0, 45, 0), spin: true };
+
+function updateCam() {
+  const cp = Math.cos(state.pitch), sp = Math.sin(state.pitch);
+  camera.position.set(
+    state.target.x + state.dist * cp * Math.sin(state.yaw),
+    state.target.y + state.dist * sp,
+    state.target.z + state.dist * cp * Math.cos(state.yaw));
+  camera.lookAt(state.target);
+}
+
+let model = null;
+const loader = new GLTFLoader();
+const meshes = [];
+loader.loadAsync(`/models/players/${cls}_${team}.glb`).then(g => {
+  model = g.scene;
+  scene.add(model);
+  const box = new THREE.Box3().setFromObject(model);
+  state.target.set(0, (box.min.y + box.max.y) / 2, 0);
+  state.dist = Math.max(box.getSize(new THREE.Vector3()).length() * 1.4, 100);
+  model.traverse(o => { if (o.isMesh) meshes.push(o); });
+  updateCam();
+});
+
+// orbit controls (left drag)
+let drag = false, lx = 0, ly = 0;
+addEventListener('pointerdown', e => { drag = true; lx = e.clientX; ly = e.clientY; });
+addEventListener('pointerup', () => { drag = false; });
+addEventListener('pointermove', e => {
+  if (!drag) return;
+  state.yaw -= (e.clientX - lx) * 0.006;
+  state.pitch = Math.max(-1.4, Math.min(1.4, state.pitch + (e.clientY - ly) * 0.006));
+  lx = e.clientX; ly = e.clientY;
+  updateCam();
+});
+addEventListener('wheel', e => {
+  state.dist = Math.max(40, Math.min(1500, state.dist * (e.deltaY > 0 ? 1.12 : 0.89)));
+  updateCam();
+}, { passive: true });
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'f') {
+    // toggle UV v-flip live by remapping the texture matrix
+    for (const m of meshes) {
+      const mat = Array.isArray(m.material) ? m.material : [m.material];
+      for (const mm of mat) {
+        if (mm.map) mm.map.matrixAutoUpdate = true;
+        if (mm.map) { mm.map.flipY = !mm.map.flipY; mm.map.needsUpdate = true; }
+      }
+    }
+    hud.textContent = 'flipped UV V (' + (meshes[0]?.material.map.flipY ? 'flipY on' : 'flipY off') + ')';
+  }
+  if (k === 'r') state.spin = !state.spin;
+});
+
+const hud = document.getElementById('hud');
+function animate() {
+  requestAnimationFrame(animate);
+  if (model && state.spin) { model.rotation.y += 0.004; }
+  renderer.render(scene, camera);
+}
+animate();
+addEventListener('resize', () => {
+  camera.aspect = window.innerWidth / window.innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(window.innerWidth, window.innerHeight);
+});
+</script>
+</body>
+</html>
