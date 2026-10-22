@@ -50,7 +50,6 @@ def _mip_size(fmt: int, w: int, h: int) -> int:
 
 def _decode_dxt1(data: bytes, w: int, h: int) -> bytearray:
     out = bytearray(w * h * 4)
-    offsets = ((0, 0), (4, 0), (0, 4), (4, 4))
     pos = 0
     for by in range(0, h, 4):
         for bx in range(0, w, 4):
@@ -72,7 +71,8 @@ def _decode_dxt1(data: bytes, w: int, h: int) -> bytearray:
                     ((r0 + r1) // 2, (g0 + g1) // 2, (b0 + b1) // 2, 255),
                     (0, 0, 0, 0),
                 ]
-            for i, (dx, dy) in enumerate(offsets):
+            for i in range(16):
+                dx, dy = i % 4, i // 4
                 x, y = bx + dx, by + dy
                 if x >= w or y >= h:
                     continue
