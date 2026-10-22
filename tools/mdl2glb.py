@@ -312,7 +312,7 @@ class Textures:
         self.tex = vpk.Vpk(os.path.join(tf_dir, "tf2_textures_dir.vpk"))
         self.cache: dict[str, tuple[int, int, bytes] | None] = {}
 
-    def resolve_material(self, name: str) -> str | None:
+    def resolve_material(self, name: str, model_dir: str | None = None) -> str | None:
         """Resolve a texture/material name to a full VMT path in the VPK.
 
         Bare names (no '/') live next to their .mdl, but the directory does
@@ -331,7 +331,17 @@ class Textures:
         suffix = "/" + name + ".vmt"
         hits = [k for k in self.misc.entries
                 if k.startswith("materials/models/player/") and k.endswith(suffix)]
-        return hits[0] if len(hits) == 1 else (hits[0] if hits else None)
+        if not hits:
+            return None
+        if len(hits) > 1:
+            # Ambiguous bare name: prefer the hit in the model's own material
+            # directory, then the shallowest path. HWM duplicates (models/…/hwm/)
+            # have a different UV layout and must NOT be picked for lo-d meshes
+            # (medic's face rendered black because hwm/medic_head_red.vmt won).
+            own = [h for h in hits if model_dir and model_dir in h]
+            pool = own or hits
+            hits = sorted(pool, key=lambda h: h.count("/"))
+        return hits[0]
 
     def vmt_basetexture(self, material_path: str) -> str | None:
         try:
@@ -431,7 +441,7 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
         tex_name = mdl.texture_names[tex_index]
         # Bare texture names (no path) are relative to the model's own
         # material directory; derive that from a fully qualified sibling.
-        vmt = textures.resolve_material(tex_name)
+        vmt = textures.resolve_material(tex_name, model_dir)
         base = textures.vmt_basetexture(vmt) if vmt else None
         if base is None:
             base = tex_name
