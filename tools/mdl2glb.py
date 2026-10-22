@@ -492,12 +492,20 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
                     uvs.extend(uv)
                 tris = mesh_tris[me]["strips"] if me < len(mesh_tris) else []
                 valid = []
+                valid_out = []
                 max_v = count - 1
                 for t in tris:
                     if 0 <= t <= max_v:
                         valid.append(t + vstart)
                 if len(valid) < 3:
                     continue
+                # Source/D3D strips are CW front faces; glTF expects CCW.
+                # Emit (a, c, b) to flip winding — verified against vertex normals:
+                # without this the meshes render inside-out (black faces).
+                it = iter(valid)
+                for a, b2, c in zip(it, it, it):
+                    valid_out.extend((a, c, b2))
+                valid = valid_out
                 mat_index = material_for(mesh["material"])
                 if mat_index is None:
                     continue
