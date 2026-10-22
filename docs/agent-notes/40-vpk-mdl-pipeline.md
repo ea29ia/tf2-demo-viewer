@@ -179,3 +179,16 @@ EOF
    colors (bigger job, separate tool `bsp2glb` rewrite).
 5. Update `playerModels.ts` to load the new GLBs (they are NOT Draco-compressed
    — remove/keep DRACOLoader for backward compat).
+
+## Post-handoff fix (2026-10-22, late night): origMeshVertID deref was MISSING
+The dx90 VTX reader (`Vtx.root_lod` in mdl2glb.py) extended `tris` with the RAW
+strip-group indices; strip-group index arrays are compacted/reordered relative
+to the mesh vertex list, so indices must be dereferenced through the group's
+Vertex_t array (`verts[...]`, origMeshVertID at byte offset +4 of the 9-byte
+packed struct) to get mesh-local vertex ids. Symptom of the bug: geometry and
+UVs scrambled relative to each other — models rendered as a grey plastic-bag
+silhouette (texture sampled from wrong texels). The "gotchas" section above
+already documented the correct rule; the code just didn't implement it.
+Also verified NOT the cause: mesh.vertexoffset (applied via
+model.vertexbase + mesh.vertexoffset when copying vertices; mesh-local
+indices align), tristrip flip handling, bone weights (static export, unused).

@@ -287,11 +287,11 @@ class Vtx:
                                 h(gh + gindex_offset + (sindex_offset + k) * 2)
                                 for k in range(snum_indices)]
                             if sflags & STRIP_IS_TRILIST:
-                                tris.extend(indices)
+                                tris.extend(verts[j] for j in indices)
                             else:
                                 # triangle strip -> triangle list
                                 for k in range(len(indices) - 2):
-                                    a, b2, c = indices[k:k + 3]
+                                    a, b2, c = (verts[j] for j in indices[k:k + 3])
                                     if k & 1:
                                         tris.extend((b2, a, c))
                                     else:
