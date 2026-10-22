@@ -142,6 +142,21 @@ cd web && npx tsc --noEmit && npm run build
   kept in web/public/replay/backup_upward/, not in git).
 - Click-to-inspect still broken (user reports clicks don't fire); deferred.
 
+## Session update — 2026-10-22 (late night): "geometry explosion" fixed
+
+- User-reported spikes/shards sticking out of the map. Root cause (found via
+  two parallel subagents: clean rebuild + triangle-level forensics):
+  `add_flat()` in `tools/bsp2glb.py` fan-triangulated brush faces polluted
+  with near-duplicate/collinear vertices → ~21k degenerate slivers rendered
+  as needles. NOT props, NOT kits, NOT the new player models.
+- Fix: `clean_polygon()` + `ear_clip()` in bsp2glb.py; upward base mesh
+  65136 → 43994 tris; with props+kits 57914 tris, validate PASS.
+  `validate_glb.py` threshold recalibrated (min 35000 tris).
+- Verified in headless chromium: default view clean, close-ups at the former
+  spike apexes (1408,926,297) and (167,884,-7) show normal geometry,
+  tsc + build exit 0. Commit 813847d. Debug hooks (window.__scene/__cam)
+  removed after use — re-add temporarily if scene forensics is needed again.
+
 ## Session update — 2026-10-22 (night): VPK player models shipped
 
 - **All 9 classes × 2 teams exported from the local VPKs** into

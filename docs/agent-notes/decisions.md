@@ -49,3 +49,17 @@ both keeps Y-up (glTF) and makes the model face local +x — the direction the
 viewer needs because it applies group.rotation.y = yaw with forward
 (cos yaw, 0, -sin yaw). If future prop models look "lying down", suspect a
 different model-space convention in their VVD before touching the viewer.
+
+## 2026-10-22 — bsp2glb ear-clip triangulation (the "geometry explosion")
+The spike/shard artifacts in the map mesh were NOT props or player models:
+add_flat() fan-triangulated brush faces whose polygons carry near-duplicate
+and collinear vertices from brush plane splits, emitting ~21k zero-area
+slivers whose long edges stick out of surfaces (5670 needle triangles
+catalogued by tri-level analysis). Fix: clean_polygon() (dedupe <0.05u,
+drop collinear mids) + ear_clip() on the dominant plane, zero-area ears
+skipped. upward: 65136 -> 43994 base tris (57914 with props+kits).
+validate_glb.py min-tri threshold recalibrated 50000 -> 35000 — if a future
+build again emits slivers the count RISES, so the low threshold still
+catches catastrophic under-generation. Diagnostics worth keeping: raycast
+via headless chromium + triangle-level AABB scan of the scene mesh (see
+/tmp/opencode/needles.py pattern in the 40- note if needed).
