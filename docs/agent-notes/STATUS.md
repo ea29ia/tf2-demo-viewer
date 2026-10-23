@@ -634,3 +634,22 @@ User: "gates and cart not visible". Two causes:
 validate_glb.py PASS (44986 tris, 18.0 MiB). Cart: confirmed all cart props
 are real meshes at BLU spawn; the MOVING cart (func_tracktrain + 175
 path_track) remains TODO (needs replay data).
+
+## Session update — 2026-10-23 (night 5): gates/lockers feedback round
+
+User: "gates are solid objects, not a grate; no cart; lockers face the wall".
+- **Gates**: the func_door brush models ARE solid blockers (METALDOOR01/IBEAM
+  boxes) — the VISUAL gates are the static door props (door_slide_large,
+  spawnroom_door_left, door_grate_*), which were already meshes. The brush
+  geometry z-fought/hid them. REVERTED the brushmodels geometry: the tool now
+  only appends prop_dynamic extras (rewritten, JSON-chunk-only rewrite —
+  BIN untouched). Gate visuals = door props; opening animation = TODO.
+- **Lockers**: rotated 180 deg yaw for the resupply batch (empirical; verified
+  against func_regenerate volumes: locker sits against the wall, front must
+  point into the room). USER re-check pending.
+- **Cart**: static cart (base+bomb+supplies) IS at BLU spawn near the track
+  start — the user looked for it on the track mid-map. The MOVING cart
+  (func_tracktrain along 175 path_track nodes) needs cart motion data:
+  replay.bin v4 (PLAN.md contract update + dumper + reader). That is the
+  next big work item, not a rendering bug.
+Verified: validate_glb.py PASS, tsc + build exit 0.

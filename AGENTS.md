@@ -19,7 +19,7 @@ viewer/
     probe_props.py   static-prop lump parser (finds entry stride etc.)
     add_props_glb.py oriented prop boxes + foliage split + extras metadata
     add_kits_glb.py  health/ammo kit pads + kit extras
-    add_brushmodels_glb.py func_door brush geometry + prop_dynamic lockers
+    add_brushmodels_glb.py prop_dynamic entities (resupply lockers) -> extras
     get_map.sh       downloads maps from public fastdl mirrors
     validate_glb.py  GLB sanity check (tri count, bbox) — must PASS
   web/               Vite + TypeScript + three.js viewer
