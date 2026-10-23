@@ -257,6 +257,7 @@ def displacement_triangles(power: int):
 # ---------------------------------------------------------------------------
 LM_ATLAS = 2048          # atlas side in texels (~1.2M luxels on upward)
 LM_GUTTER = 1            # 1px border against linear-filter bleeding
+WHITE_CELL = 4           # reserved NxN texels at the origin for unlit faces
 
 
 def pack_lightmaps(rects):
@@ -266,17 +267,20 @@ def pack_lightmaps(rects):
     texels, where (x, y) is the first LUXEL of the cell (the gutter sits at
     x-1/y-1). Unpackable rects (larger than the atlas) are absent; callers
     must treat them as unlit.
+
+    Texels (0..WHITE_CELL-1) in both axes are reserved for the unlit white
+    cell — placement starts right after it.
     """
     placed = {}
-    rows = []  # [y, height, cursor_x]
-    x = y = 0
+    x = WHITE_CELL
+    y = WHITE_CELL
     row_h = 0
     for key, w, h in sorted(rects, key=lambda r: -r[2]):
         if w > LM_ATLAS or h > LM_ATLAS:
             continue
         if x + w > LM_ATLAS:  # start a new shelf
             y += row_h
-            x = 0
+            x = WHITE_CELL
             row_h = 0
         if y + h > LM_ATLAS:
             continue  # atlas exhausted; face stays unlit
@@ -515,13 +519,15 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
         """World position -> lightmap ATLAS UV (TEXCOORD_1).
 
         Luxel coords come from the texinfo lightmap vectors
-        (u = P·s + shift, in luxel units); u/v are clamped to the face's
-        [0, size-1] luxel rect, then mapped into the face's atlas cell with
-        the half-luxel texel-centre offset. Unlit faces map to the reserved
-        white 2x2 cell at the atlas origin.
+        (u = P·s + shift, in luxel units). The projection lives in the range
+        [mins, mins + size - 1] (mins = dface_t lightmapMins, frequently
+        NEGATIVE — the grid extends half a luxel past the face edges), so the
+        atlas-relative coordinate is u - mins. Clamping stays as slack only.
+        Unlit faces map to the reserved white 2x2 cell at the atlas origin.
         """
         cell = lm_cells.get(face_index)
         sx, sy = face[16], face[17]
+        mins_x, mins_y = face[14], face[15]
         lux = (lm_s[0], lm_s[1], lm_s[2])
         luy = (lm_s[3],)
         ltv = (lm_t[0], lm_t[1], lm_t[2])
@@ -532,6 +538,8 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
                 return (WHITE_CELL_UV[0], WHITE_CELL_UV[1])
             u = p[0] * lux[0] + p[1] * lux[1] + p[2] * lux[2] + luy[0]
             v = p[0] * ltv[0] + p[1] * ltv[1] + p[2] * ltv[2] + lty[0]
+            u -= mins_x
+            v -= mins_y
             u = max(0.0, min(float(sx - 1), u))
             v = max(0.0, min(float(sy - 1), v))
             ax, ay, _w, _h = cell
@@ -707,17 +715,18 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
             continue
         emitted_indices.append(fi)
 
-    # Reserve a 2x2 white cell at (0,0) for unlit faces (lightofs = -1 or
-    # unpackable rects); write its RGB first.
+    # Reserve a WHITE_CELLed white square at the origin for unlit faces
+    # (lightofs = -1 or unpackable rects); pack_lightmaps starts after it.
     white_cell = bytearray(LM_ATLAS * LM_ATLAS * 3)
-    for j in range(2):
-        for i in range(2):
-            k = ((j) * LM_ATLAS + i) * 3
+    for j in range(WHITE_CELL):
+        for i in range(WHITE_CELL):
+            k = (j * LM_ATLAS + i) * 3
             white_cell[k] = 255
             white_cell[k + 1] = 255
             white_cell[k + 2] = 255
 
-    WHITE_CELL_UV = (1.0 / LM_ATLAS, 1.0 / LM_ATLAS)
+    # Texel-centre of the reserved white square.
+    WHITE_CELL_UV = (WHITE_CELL / 2 / LM_ATLAS, WHITE_CELL / 2 / LM_ATLAS)
 
     rects = []
     for fi in emitted_indices:
