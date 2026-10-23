@@ -55,20 +55,27 @@ def load_glb(path: str):
     return gltf
 
 
-def write_glb(path: str, gltf: dict) -> None:
+def load_glb_bin(path: str, gltf: dict) -> None:
+    """Attach the BIN chunk as a mutable bytearray under gltf['_bin']."""
     with open(path, "rb") as f:
         data = f.read()
     pos = 12
-    bin_chunk = b""
     while pos < len(data):
         length, kind = struct.unpack_from("<II", data, pos)
         pos += 8
         chunk = data[pos:pos + length]
         pos += length
         if kind == 0x004E4942:
-            bin_chunk = chunk
+            gltf["_bin"] = bytearray(chunk)
+            return
+    gltf["_bin"] = bytearray()
+
+
+def write_glb(path: str, gltf: dict) -> None:
+    bin_chunk = bytes(gltf.pop("_bin", b""))
     json_blob = json.dumps(gltf, separators=(",", ":")).encode("utf-8")
     json_blob += b" " * ((4 - len(json_blob) % 4) % 4)
+    bin_chunk += b"\0" * ((4 - len(bin_chunk) % 4) % 4)
     total = 12 + 8 + len(json_blob) + 8 + len(bin_chunk)
     with open(path, "wb") as f:
         f.write(struct.pack("<4sII", b"glTF", 2, total))
@@ -242,17 +249,221 @@ def main(argv: list[str]) -> int:
     index = WallIndex(bsp)
     print(f"wall index: {len(index.tris)} vertical triangles", file=sys.stderr)
 
+    # --- func_door brush panels (the visible gate doors) -------------------
+    # Restored: the func_door brush models ARE the visible door panels
+    # (METALDOOR01_192 solid door with grate window at redC1/C3/C4,
+    # IBEAM001B beam doors elsewhere). Without them the spawn gates vanish.
+    # Brush-model vertices are relative to the entity origin -> translate.
+    load_glb_bin(glb_path, gltf)  # populates gltf["_bin"] (mutable bytearray)
+    blob: bytearray = gltf["_bin"]
+    cursor = len(blob)
+
+    def append_view(data: bytes, target: int) -> int:
+        nonlocal cursor
+        padded = data + b"\0" * ((4 - len(data) % 4) % 4)
+        view = {"buffer": 0, "byteOffset": cursor, "byteLength": len(data)}
+        if target:
+            view["target"] = target
+        gltf.setdefault("bufferViews", []).append(view)
+        blob.extend(padded)
+        cursor += len(padded)
+        return len(gltf["bufferViews"]) - 1
+
+    def append_accessor(view: int, count: int, kind: str,
+                        comp: int, minmax=None) -> int:
+        acc = {"bufferView": view, "componentType": comp,
+               "count": count, "type": kind}
+        if minmax:
+            acc["min"], acc["max"] = minmax
+        gltf.setdefault("accessors", []).append(acc)
+        return len(gltf["accessors"]) - 1
+
+    material_names: dict[str, int] = {}
+    for mat_index, mat in enumerate(gltf.get("materials", [])):
+        texdata = (mat.get("extras") or {}).get("texdata")
+        if texdata:
+            material_names.setdefault(texdata, mat_index)
+
+    door_models: dict[int, dict] = {}
+    for ent in parse_entities(bsp):
+        if ent.get("classname") not in ("func_door", "func_door_rotating"):
+            continue
+        match = re.fullmatch(r"\*(\d+)", ent.get("model", ""))
+        if not match:
+            continue
+        model_index = int(match.group(1))
+        entry = door_models.setdefault(model_index, {
+            "origin": [0.0, 0.0, 0.0],
+        })
+        origin = ent.get("origin")
+        if origin:
+            entry["origin"] = [float(v) for v in origin.split()]
+
+    door_builders: dict[str, bsp2glb.MeshBuilder] = {}
+    planes = bsp.planes()
+    vertices = bsp.vertices()
+    edges = bsp.edges()
+    surfedges = bsp.surfedges()
+    texinfo_raw = bsp.lump(bsp2glb.LUMP_TEXINFO)
+    tex_names = bsp.texture_names()
+    texdata = bsp.texdata_entries()
+    faces_raw = bsp.lump(7)
+    models_raw = bsp.lump(14)
+    white_lmap = (0.004, 0.004)  # reserved white atlas cell centre
+
+    doors_added = 0
+    for model_index in sorted(door_models):
+        if model_index * 48 + 48 > len(models_raw):
+            continue
+        entry = door_models[model_index]
+        vals = struct.unpack_from("<9fi2i", models_raw, model_index * 48)
+        first_face, num_faces = vals[10], vals[11]
+        for fi in range(first_face, first_face + num_faces):
+            face = FACE_STRUCT.unpack_from(faces_raw, fi * 56)
+            texinfo_index = face[5]
+            if texinfo_index * 72 + 72 > len(texinfo_raw):
+                continue
+            ti_vals = TEXINFO_STRUCT.unpack_from(
+                texinfo_raw, texinfo_index * TEXINFO_STRUCT.size)
+            texdata_index = ti_vals[-1]
+            if not (0 <= texdata_index < len(texdata)):
+                continue
+            name_index, tex_w, tex_h = texdata[texdata_index]
+            name = (tex_names[name_index]
+                    if 0 <= name_index < len(tex_names) else "")
+            if not name:
+                continue
+            if ti_vals[bsp2glb.TEXINFO_FLAGS_INDEX] & bsp2glb.SKIP_FACE_FLAGS:
+                continue
+            builder = door_builders.get(name)
+            if builder is None:
+                builder = door_builders[name] = bsp2glb.MeshBuilder()
+
+            first_edge, num_edges = face[3], face[4]
+            if num_edges < 3:
+                continue
+            poly = []
+            ok = True
+            for j in range(num_edges):
+                se = surfedges[first_edge + j]
+                edge_index = se if se >= 0 else -se
+                if edge_index >= len(edges) // 2:
+                    ok = False
+                    break
+                e0 = edges[edge_index * 2]
+                e1 = edges[edge_index * 2 + 1]
+                vi = e0 if se >= 0 else e1
+                if vi >= len(vertices) // 3:
+                    ok = False
+                    break
+                # Model-relative verts -> world space via the entity origin.
+                poly.append((
+                    vertices[vi * 3] + entry["origin"][0],
+                    vertices[vi * 3 + 1] + entry["origin"][1],
+                    vertices[vi * 3 + 2] + entry["origin"][2],
+                ))
+            if not ok or len(poly) < 3:
+                continue
+
+            plane = planes[face[0]]
+            normal = (plane[0], plane[1], plane[2])
+            if face[1] == 1:
+                normal = (-normal[0], -normal[1], -normal[2])
+            normal = bsp2glb.normalize(normal)
+            s_vec = (ti_vals[0], ti_vals[1], ti_vals[2], ti_vals[3])
+            t_vec = (ti_vals[4], ti_vals[5], ti_vals[6], ti_vals[7])
+            width = float(tex_w or 1)
+            height = float(tex_h or 1)
+
+            def uv_of(p, s_vec=s_vec, t_vec=t_vec, width=width, height=height):
+                return (
+                    (p[0] * s_vec[0] + p[1] * s_vec[1] + p[2] * s_vec[2]
+                     + s_vec[3]) / width,
+                    (p[0] * t_vec[0] + p[1] * t_vec[1] + p[2] * t_vec[2]
+                     + t_vec[3]) / height,
+                )
+
+            cleaned = bsp2glb.clean_polygon(poly, normal)
+            if len(cleaned) < 3:
+                continue
+            base = builder.vertex_count
+            color = bsp2glb.palette_color(name)
+            for p in cleaned:
+                builder.add_vertex(p, normal, color, uv_of(p), white_lmap)
+            for tri in bsp2glb.ear_clip(cleaned, normal):
+                builder.add_triangle(base + tri[0], base + tri[1],
+                                     base + tri[2], normal)
+            doors_added += 1
+
+    new_primitives: list[dict] = []
+    mesh_index = len(gltf.get("meshes", []))
+    for name in sorted(door_builders):
+        builder = door_builders[name]
+        if builder.vertex_count == 0 or not builder.indices:
+            continue
+        pos_acc = append_accessor(
+            append_view(builder.positions.tobytes(), 34962),
+            builder.vertex_count, "VEC3", 5126, (builder.min, builder.max))
+        nrm_acc = append_accessor(
+            append_view(builder.normals.tobytes(), 34962),
+            builder.vertex_count, "VEC3", 5126)
+        col_acc = append_accessor(
+            append_view(builder.colors.tobytes(), 34962),
+            builder.vertex_count, "VEC3", 5126)
+        uv_acc = append_accessor(
+            append_view(builder.uvs.tobytes(), 34962),
+            builder.vertex_count, "VEC2", 5126)
+        lmap_acc = append_accessor(
+            append_view(builder.lmap.tobytes(), 34962),
+            builder.vertex_count, "VEC2", 5126)
+        idx_acc = append_accessor(
+            append_view(builder.indices.tobytes(), 34963),
+            len(builder.indices), "SCALAR", 5125)
+
+        mat_index = material_names.get(name)
+        if mat_index is None:
+            mat_index = len(gltf["materials"])
+            gltf.setdefault("materials", []).append({
+                "name": name,
+                "pbrMetallicRoughness": {"baseColorFactor": [0.5, 0.5, 0.5, 1.0],
+                                          "metallicFactor": 0.0,
+                                          "roughnessFactor": 0.9},
+                "extras": {"texdata": name},
+            })
+            material_names[name] = mat_index
+        new_primitives.append({
+            "attributes": {
+                "POSITION": pos_acc,
+                "NORMAL": nrm_acc,
+                "COLOR_0": col_acc,
+                "TEXCOORD_0": uv_acc,
+                "TEXCOORD_1": lmap_acc,
+            },
+            "indices": idx_acc,
+            "material": mat_index,
+        })
+    if new_primitives:
+        gltf.setdefault("meshes", []).append(
+            {"name": "brushmodels", "primitives": new_primitives})
+        node_index = len(gltf.get("nodes", []))
+        gltf.setdefault("nodes", []).append({
+            "name": "brushmodels", "mesh": mesh_index})
+        gltf.setdefault("scenes", [{}])[0].setdefault("nodes", []).append(
+            node_index)
+    print(f"func_door faces appended: {doors_added} "
+          f"({len(new_primitives)} primitives)", file=sys.stderr)
+
     appended = 0
     for ent, model_id, o in candidates:
         angles = ent.get("angles") or "0 0 0"
         pitch, yaw, roll = (float(v) for v in angles.split()[:3])
-        # Wall-snap ONLY the resupply lockers: signs/billboards are wall-
-        # mounted with correct authored angles, floor-standing lockers are
-        # the batch the user flagged as facing the wall.
-        if "resupply" in model_id.lower():
-            wall_yaw = nearest_wall_yaw(index, (o[0], o[1], o[2] + 32.0))
-            if wall_yaw is not None:
-                yaw = wall_yaw
+        # Locker orientation, user-calibrated (2026-10-23 eyeball round):
+        # with the authored Source QAngles the RED-side lockers (x > 0)
+        # stand correctly, the BLUE-side ones (x < 0) need a 90 deg CCW
+        # turn (Source yaw +90). The BSP-raycast wall-snap did not match
+        # what the user saw in game, so it stays unused for now.
+        if "resupply" in model_id.lower() and o[0] < 0:
+            yaw = (yaw + 90.0) % 360.0
         props.append({
             "n": ent.get("model"),
             "o": o,
@@ -264,7 +475,7 @@ def main(argv: list[str]) -> int:
         if "resupply" in model_id.lower():
             print(f"  {model_id} at ({o[0]:.0f},{o[1]:.0f},{o[2]:.0f}): "
                   f"authored yaw={float(angles.split()[1]) if angles else 0:.0f} "
-                  f"-> wall-facing yaw={yaw:.0f}", file=sys.stderr)
+                  f"-> final yaw={yaw:.0f}", file=sys.stderr)
     print(f"prop_dynamic entities appended to extras: {appended}",
           file=sys.stderr)
 
