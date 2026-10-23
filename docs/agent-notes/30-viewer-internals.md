@@ -7,9 +7,11 @@
 
 ## State
 
-Single-page three.js app (~1400 lines main.ts). Loads `/maps/<map>.glb` and
-`/replay/replay.bin`, plays back tick-by-tick with interpolation. Entry point
-`boot()`; animation loop `animate()`; all camera logic in `updateCamera(dt)`.
+Single-page three.js app. `main.ts` is a thin 20-line bootstrap; all logic
+lives in `web/src/viewer/` (camera.ts, playback.ts, playerViews.ts,
+inspect.ts, input.ts, damageFx.ts, projectiles.ts, nameLabels.ts,
+frameCache.ts, dom.ts). Loads `/maps/<map>.glb` and `/replay/replay.bin`,
+plays back tick-by-tick with interpolation.
 
 ## Gotchas
 
@@ -31,9 +33,11 @@ Single-page three.js app (~1400 lines main.ts). Loads `/maps/<map>.glb` and
   (module-level Maps). Materials are cloned per player instance so opacity/
   emissive tinting (dead 0.24, out-of-PVS 0.35, cloaked spy 0.45, disguised spy
   purple emissive) never leaks between players.
-- **Player models are DRACO-compressed**; GLTFLoader needs DRACOLoader
-  (decoder path gstatic CDN 1.5.7) or all loads fail → silent capsule fallback.
-  The test scene `/modeltest.html` exists to debug model loading in isolation.
+- **Player models are plain (non-DRACO) GLBs** exported from the local VPK
+  by tools/mdl2glb.py into web/public/models/players/ (18 files, real TF2
+  textures embedded as PNG). DRACOLoader was removed from playerModels.ts
+  and modeltest.ts — no external decoder dependency. The test scene
+  `/modeltest.html` exists to debug model loading in isolation.
 - **replay.bin parsing** is centralized in `replay.ts`; `PROJ_RECORD_SIZE = 17`
   and `HURT_RECORD_SIZE = 15` must match the Rust writer (see 10-replay-format.md).
 - **Damage FX lifecycle**: popups and splash rings are spawned when

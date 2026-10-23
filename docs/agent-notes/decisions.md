@@ -80,3 +80,11 @@ via headless chromium + triangle-level AABB scan of the scene mesh (see
   TextureLoader path (ImageBitmapLoader ignores texture.flipY at upload;
   browser orientation disagreements mirror islands). [dbg] log still in
   modelview.html — remove when confirmed.
+
+## 2026-10-23: SUPERSEDED entry above (mip order)
+The 2026-10-22 one-liner "VTF mip 0 is stored first, right after the header
+(largest-first)" is WRONG and is superseded by the 2026-10-22 detailed entry
+below it ("VTF mip order was the root cause of wrong textures"): the chain is
+smallest-FIRST, mip 0 (full res) is the LAST mip_size bytes of image data.
+Append-only log, so the wrong line stays — trust this entry and vtf.py's
+comment, not the one-liner.
