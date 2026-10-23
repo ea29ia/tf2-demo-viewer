@@ -589,3 +589,32 @@ Assets gitignored (sky_*.png, Valve-derived); sky.json committed.
 Verified: tsc --noEmit + npm run build exit 0; dev server serves
 /maps/sky.json and /maps/sky_px.png 200. USER eyeball pending (sky visible,
 fog blend at horizon).
+
+## Session update — 2026-10-23 (night 3): doors (func_door), resupply lockers, cart audit
+
+User request: render the cart, the (spawn) gates and the resupply machines.
+
+- **Resupply lockers** (`models/props_gameplay/resupply_locker.mdl`): they are
+  prop_dynamic entities paired with func_regenerate (6 placements), NOT in the
+  static-prop lump — nothing rendered. Exported the model via props2glb
+  (4661 verts / 3608 tris, 0 failed textures; resupply_locker02 does not exist
+  in the VPK). New `tools/add_brushmodels_glb.py` appends prop_dynamic
+  entities whose model is in the props manifest to extras.props with the
+  standard o/a/k/m fields — the existing viewer prop loader instances them
+  (28 entities appended, 6 lockers).
+- **Spawn gates**: the door VISUALS are (a) static door props — already real
+  meshes (door_slide_large x2, spawnroom_door_left x8, door_grate frames/
+  plates), and (b) the func_door BRUSH models (*4, *16, *30, *31, *32, *33,
+  *34, *35, *41, *43; METALDOOR01_192 / METALDOOR01_96(_NOENTRY) /
+  IBEAM001B faces) which bsp2glb never emitted (worldspawn faces only).
+  `add_brushmodels_glb.py` builds them from the BSP with the same texinfo UVs
+  and appends a `brushmodels` mesh + node (78 faces, 4 primitives, 156 tris,
+  materials REUSED from the map GLB by texdata name — no texture dupes).
+  Doors render CLOSED; opening animation needs replay data (TODO).
+- **Cart**: audited — the func_tracktrain model *10 has 0 faces (cart visual
+  is props: cart_base_separate + cart_bomb_separate + mining_cart_supplies001
+  at BLU spawn, all real meshes already), and the 175 path_track nodes + the
+  moving-cart animation remain the existing TODO item (replay v4 data).
+  mapobj_cart_dispenser is an invisible logic entity — nothing to render.
+- Verified: validate_glb.py PASS (44986 tris, 18.35 MiB), tsc + build exit 0,
+  locker GLB served 200. USER eyeball pending.

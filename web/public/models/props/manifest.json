@@ -448,6 +448,10 @@
       "file": "props_gameplay_door_slide_large.glb",
       "tris": 1264
     },
+    "models/props_gameplay/resupply_locker": {
+      "file": "props_gameplay_resupply_locker.glb",
+      "tris": 3608
+    },
     "models/props_gameplay/security_fence_light01": {
       "file": "props_gameplay_security_fence_light01.glb",
       "tris": 1418

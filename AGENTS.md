@@ -19,6 +19,7 @@ viewer/
     probe_props.py   static-prop lump parser (finds entry stride etc.)
     add_props_glb.py oriented prop boxes + foliage split + extras metadata
     add_kits_glb.py  health/ammo kit pads + kit extras
+    add_brushmodels_glb.py func_door brush geometry + prop_dynamic lockers
     get_map.sh       downloads maps from public fastdl mirrors
     validate_glb.py  GLB sanity check (tri count, bbox) — must PASS
   web/               Vite + TypeScript + three.js viewer
@@ -79,6 +80,7 @@ python3 tools/add_textures_glb.py assets/pl_upward.bsp web/public/maps/pl_upward
 python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb web/public/models/props/manifest.json
 python3 tools/add_kits_glb.py web/public/maps/pl_upward.glb web/public/maps/kits.json
 python3 tools/validate_glb.py web/public/maps/pl_upward.glb
+python3 tools/add_brushmodels_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb web/public/models/props/manifest.json
 python3 tools/export_sky.py assets/pl_upward.bsp web/public/maps
 ```
 (add_textures_glb.py needs the local TF2 install for VPK textures; it
