@@ -19,6 +19,20 @@ https://github.com/ea29ia/tf2-demo-viewer (public).
 
 ## Working (verified 2026-10-21 with the exact commands below)
 
+- **Source-fidelity map pass (2026-10-23)**: lightmap luxels are decoded as
+  ColorRGBExp32 -> sRGB (was BGRA, red/blue swapped, exponent dropped), the
+  grid is (size+1)^2 with stride size+1, displacement lightmap UVs use the
+  base quad, and the atlas packer no longer overflows its 1px gutter. Brush
+  faces are filtered by SURF_NODRAW/SKY/SKIP/HINT instead of material-name
+  substrings. Alpha MASK/BLEND now comes from VMT flags and is preserved by
+  the viewer when MeshStandard is converted to MeshBasic. WorldVertexTransition
+  materials carry a second texture and blend by COLOR_0.r (displacement alpha);
+  $bumpmap is embedded as a normal map (stored, not yet shaded). Props get a
+  baked tint from the nearest lightmapped face. Verified: full GLB chain +
+  `validate_glb.py` PASS (21.5 MiB, 59014 tris, 74 materials), `tsc --noEmit`
+  and `npm run build` exit 0. Visual review (brightness, blending,
+  transparency, prop shading) is a HUMAN task via `cd web && npm run dev`.
+
 - **Health fix + replay.bin v3 (2026-10-22)**: player record `health` is now
   `u16` (record 27 bytes, VERSION 3; writer, reader and validate.py agree).
   Health sourcing fixed in the dumper: `player_hurt` event health overrides

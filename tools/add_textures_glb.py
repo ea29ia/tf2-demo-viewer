@@ -43,6 +43,31 @@ SMALL_SIZE = 256
 DEFAULT_ALPHA_CUTOFF = 0.5
 
 
+def _strip_ext(path: str) -> str:
+    """Drop a trailing `.vmt`/`.vtf` so the caller can append its own.
+
+    Some BSP texdata names already embed an extension (upward has
+    `water/water_well_beneath.vmt`), and a texture value may name a `.vtf`
+    explicitly; appending blindly produced `...vmt.vmt`.
+    """
+    p = path.replace("\\", "/").strip().strip('"')
+    low = p.lower()
+    for ext in (".vmt", ".vtf"):
+        if low.endswith(ext):
+            return p[:-len(ext)]
+    return p
+
+
+def vmt_path_for(name: str) -> str:
+    """Texdata material name -> `materials/<name>.vmt` (lowercase)."""
+    return "materials/" + _strip_ext(name).lower() + ".vmt"
+
+
+def vtf_path_for(texture: str) -> str:
+    """Texture path (with or without `.vtf`) -> `materials/<path>.vtf`."""
+    return "materials/" + _strip_ext(texture).lower() + ".vtf"
+
+
 def load_glb(path: str):
     with open(path, "rb") as f:
         data = f.read()
@@ -80,6 +105,7 @@ class PackSet:
     """Resolution order for one asset kind: BSP pak -> packs -> loose tree."""
 
     def __init__(self, bsp: bsp2glb.Bsp, tf_dir: str):
+        self.tf_dir = tf_dir
         self.pak: dict[str, bytes] = {}
         raw = bsp.lump(40)
         if raw[:4] == b"PK\x03\x04":
@@ -93,7 +119,24 @@ class PackSet:
                     self.packs.append((pack_name, vpk.open_pack(tf_dir, pack_name)))
                 except Exception as exc:  # missing VPKs: degrade, don't crash
                     print(f"warning: {pack_name} unavailable: {exc}", file=sys.stderr)
+        self._loose = None
+        self._loose_tried = False
         self.stats = {"pak": 0, "tf2_misc": 0, "tf2_textures": 0, "loose": 0}
+
+    def _loose_pack(self):
+        """Index the loose tf tree lazily, only when the packs miss.
+
+        The walk is expensive and most lookups resolve from the VPKs, so it
+        is built at most once and never when the directory does not exist.
+        """
+        if not self._loose_tried:
+            self._loose_tried = True
+            if os.path.isdir(self.tf_dir):
+                try:
+                    self._loose = vpk.LoosePack(self.tf_dir)
+                except OSError as exc:
+                    print(f"warning: loose tree unavailable: {exc}", file=sys.stderr)
+        return self._loose
 
     def read(self, path: str) -> bytes | None:
         key = path.lower().replace("\\", "/")
@@ -104,6 +147,10 @@ class PackSet:
             if pack.exists(key):
                 self.stats[pack_name] += 1
                 return pack.read(key)
+        loose = self._loose_pack()
+        if loose is not None and loose.exists(key):
+            self.stats["loose"] += 1
+            return loose.read(key)
         return None
 
 
@@ -167,10 +214,11 @@ def main(argv) -> int:
 
     # 2. Resolve VMT per material, then its texture paths.
     vmt_text: dict[int, str] = {}
+    resolved_mats: dict[int, dict] = {}
     texture_paths: dict[int, list[str]] = {}
     missing_vmt: list[str] = []
     for mat_index, name in sorted(texdata_of.items()):
-        path = "materials/" + name.lower() + ".vmt"
+        path = vmt_path_for(name)
         data = packs.read(path)
         if data is None:
             missing_vmt.append(name)
@@ -182,6 +230,7 @@ def main(argv) -> int:
             missing_vmt.append(name)
             continue
         vmt_text[mat_index] = name
+        resolved_mats[mat_index] = mat
         texture_paths[mat_index] = vmt.get_texture_paths(mat)
     print(f"materials: {len(texdata_of)} texdata-tagged, "
           f"{len(vmt_text)} VMT resolved, {len(missing_vmt)} without VMT",
@@ -197,21 +246,23 @@ def main(argv) -> int:
     bin_parts: list[bytes] = []
     cursor = len(bin_blob)
 
-    def embed(texture_path: str, size: int) -> int | None:
+    def embed(texture_path: str, size: int, label: str = "texture") -> int | None:
         nonlocal cursor
         key = (texture_path, size)
         if key in png_cache:
             return png_cache[key]
-        vtf_path = "materials/" + texture_path + ".vtf"
+        vtf_path = vtf_path_for(texture_path)
         data = packs.read(vtf_path)
         if data is None:
-            print(f"warning: no VTF for {texture_path}", file=sys.stderr)
+            print(f"warning: no VTF for {label} {texture_path}", file=sys.stderr)
             png_cache[key] = None
             return None
         try:
             w, h, rgba = vtf.decode_vtf_scaled(data, size)
         except vtf.VtfError as exc:
-            print(f"warning: VTF {texture_path}: {exc}", file=sys.stderr)
+            # An undecodable format (some normal maps use uncompressed or
+            # exotic layouts) skips that one texture, never the material.
+            print(f"warning: VTF {label} {texture_path}: {exc}", file=sys.stderr)
             png_cache[key] = None
             return None
         png = vtf.write_png_bytes(w, h, rgba)
@@ -256,15 +307,28 @@ def main(argv) -> int:
         })
 
     textured = 0
+    mask_count = 0
+    blend_count = 0
+    wvt_count = 0
+    bump_count = 0
+    kept_color_count = 0
     no_texture: list[str] = []
     mutable_bin = bytearray(bin_blob)
+    # TODO: `$detail` / `$detailscale` / `$detailblendmode` (and
+    # `$detailblendfactor`) are NOT implemented. Source blends a third,
+    # world-space UV texture over the base at low opacity (grass/dirt
+    # breakup, rust). glTF has no second-UV-scale slot in the core material
+    # model, so this needs either a custom shader extension or a pre-baked
+    # atlas; until then detail materials render with the base texture only.
     for mat_index in sorted(texdata_of):
         mat = materials[mat_index]
         paths = texture_paths.get(mat_index) or []
         if not paths:
             no_texture.append(texdata_of[mat_index])
             continue
-        # WorldVertexTransition: only slot 0 for now (blend phase comes later).
+        resolved = resolved_mats[mat_index]
+        shader = vmt.shader_name_of(resolved)
+        wvt = shader == "worldvertextransition"
         size = LARGE_SIZE if area_of.get(mat_index, 0.0) >= LARGE_AREA else SMALL_SIZE
         texture_index = embed(paths[0], size)
         if texture_index is None:
@@ -272,20 +336,75 @@ def main(argv) -> int:
             continue
         pbr = mat.setdefault("pbrMetallicRoughness", {})
         pbr["baseColorTexture"] = {"index": texture_index, "texCoord": 0}
+        # Source material opacity -> glTF alpha mode. PNGs carry the VTF
+        # alpha channel, so only the mode/cutoff flags are missing.
+        if vmt.is_alpha_tested(resolved):
+            mat["alphaMode"] = "MASK"
+            mat["alphaCutoff"] = vmt.alpha_test_reference(
+                resolved, DEFAULT_ALPHA_CUTOFF)
+            mask_count += 1
+        elif vmt.is_translucent(resolved) or vmt.is_decal(resolved):
+            mat["alphaMode"] = "BLEND"
+            blend_count += 1
+        # WorldVertexTransition blends two materials by COLOR_0.r. The blend
+        # weight (red channel) comes from bsp2glb.py on displacement faces.
+        # Transport the second texture in the emissive slot: emissiveFactor
+        # is zero, so a spec-compliant renderer shows nothing extra, and the
+        # viewer reads emissiveTexture as the blend map. See extras.sourceBlend.
+        blend_index = None
+        if wvt:
+            tex2 = resolved.get("$basetexture2")
+            tex2_path = vmt.normalize_texture_path(tex2) if isinstance(tex2, str) else ""
+            if tex2_path:
+                blend_index = embed(tex2_path, size, "WVT $basetexture2")
+            if blend_index is not None:
+                mat["emissiveTexture"] = {"index": blend_index, "texCoord": 0}
+                mat["emissiveFactor"] = [0.0, 0.0, 0.0]
+                mat.setdefault("extras", {})["sourceBlend"] = {
+                    "shader": "WorldVertexTransition",
+                    "channel": "COLOR_0.r",
+                    "texture2Index": blend_index,
+                }
+                wvt_count += 1
+            else:
+                print(f"warning: WVT material {texdata_of[mat_index]} has no "
+                      f"usable $basetexture2, rendering unblended",
+                      file=sys.stderr)
+            # TODO: `$blendmodulatetexture` (detail-style modulation of the
+            # blend weight, smoothstep-shaped) is not implemented either.
+        # $bumpmap -> normalTexture. Source normal maps are usually DXT5
+        # (X in alpha, Y in green, X/Y optionally signed) or BGR888; the
+        # existing VTF decoder covers those, and anything it cannot decode
+        # only loses this material's normal map.
+        bump = resolved.get("$bumpmap")
+        bump_path = vmt.normalize_texture_path(bump) if isinstance(bump, str) else ""
+        if bump_path:
+            bump_index = embed(bump_path, size, "normal map $bumpmap")
+            if bump_index is not None:
+                mat["normalTexture"] = {"index": bump_index, "texCoord": 0}
+                mat.setdefault("extras", {})["sourceBumpmap"] = True
+                bump_count += 1
         # glTF multiplies COLOR_0 into the base color; the palette vertex
         # colors were the pre-texture stand-in and would darken/tint the real
         # texture. Neutralise them (in place — offsets stay valid) once the
-        # material has a map.
-        vcolor_prim = next(p for p in world["primitives"] if p.get("material") == mat_index)
-        cacc = gltf["accessors"][vcolor_prim["attributes"]["COLOR_0"]]
-        cview = gltf["bufferViews"][cacc["bufferView"]]
-        coff = cview.get("byteOffset", 0) + cacc.get("byteOffset", 0)
-        ones = b"\x01\x00\x80\x3f" * (cacc["count"] * 3)  # 1.0f little-endian
-        mutable_bin[coff:coff + len(ones)] = ones
-        shader = vmt.shader_name_of(
-            vmt.resolve(
-                packs.read("materials/" + texdata_of[mat_index].lower() + ".vmt")
-                .decode("latin-1"), packs.read))
+        # material has a map — EXCEPT where Source itself consumes COLOR_0:
+        # WVT keeps the blend weight in .r, $vertexcolor/$vertexalpha keep
+        # the tint/opacity.
+        keep_vertex_color = (
+            blend_index is not None
+            or vmt.has_vertex_color(resolved)
+            or vmt.has_vertex_alpha(resolved)
+        )
+        if keep_vertex_color:
+            kept_color_count += 1
+        else:
+            vcolor_prim = next(p for p in world["primitives"]
+                               if p.get("material") == mat_index)
+            cacc = gltf["accessors"][vcolor_prim["attributes"]["COLOR_0"]]
+            cview = gltf["bufferViews"][cacc["bufferView"]]
+            coff = cview.get("byteOffset", 0) + cacc.get("byteOffset", 0)
+            ones = b"\x01\x00\x80\x3f" * (cacc["count"] * 3)  # 1.0f little-endian
+            mutable_bin[coff:coff + len(ones)] = ones
         if shader == "unlitgeneric":
             ext = mat.setdefault("extensions", {})
             ext["KHR_materials_unlit"] = {}
@@ -305,6 +424,12 @@ def main(argv) -> int:
 
     print(f"textures embedded: {textured} materials "
           f"({len(set(k[0] for k in png_cache if png_cache[k] is not None))} unique PNGs)",
+          file=sys.stderr)
+    print(f"alpha modes: MASK {mask_count}, BLEND {blend_count}", file=sys.stderr)
+    print(f"worldvertextransition: {wvt_count} materials with blend texture "
+          f"(transport: emissiveTexture, weight: COLOR_0.r)", file=sys.stderr)
+    print(f"normal maps attached: {bump_count}", file=sys.stderr)
+    print(f"COLOR_0 kept (WVT/$vertexcolor/$vertexalpha): {kept_color_count}",
           file=sys.stderr)
     if no_texture:
         print(f"materials without texture ({len(no_texture)}): "

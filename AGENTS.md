@@ -42,14 +42,23 @@ viewer/
    - tools changed: regenerate GLB + `python3 tools/validate_glb.py` (must print PASS)
    - web changed: `npx tsc --noEmit && npm run build` (both exit 0)
    Paste the actual output into the report. No "should work".
-4. **Coordinate conventions.** Source is Z-up; the GLB keeps Source coordinates;
+4. **Visual checks are for humans, not headless browsers.** Never use a headless
+   browser (screenshots, Puppeteer/Playwright, `browser.preview` of rendered
+   pages, headless Chrome) to inspect maps, textures, lighting, models, UI or
+   any other image output. Agents must not judge visuals from machine-rendered
+   screenshots. Instead: produce the artifact (GLB, atlas PNG, replay), state
+   the exact file path and the command that opens it (`npm run dev`), and ask
+   the human to look and report back. Automated numeric checks
+   (`validate_glb.py`, `validate.py`, `tsc`/`build`) stay mandatory; they do
+   not replace the human visual review.
+5. **Coordinate conventions.** Source is Z-up; the GLB keeps Source coordinates;
    the scene rotates the map by `-PI/2` X and maps `(x,y,z) -> (x,z,-y)`. Any new
    geometry or lookup must use that mapping or it will be silently misplaced.
    The click-inspect metadata (`extras.props`) stores Source-space positions and is
    converted in `collectPropEntries`.
-5. **No Valve assets in git.** `.bsp`, `.glb`, `replay.bin` are gitignored; commit
+6. **No Valve assets in git.** `.bsp`, `.glb`, `replay.bin` are gitignored; commit
    only code and small data (kits.json is fine — it's coordinates).
-6. **Windows/paths:** two dev boxes are in use. The aarch64 Android (Termux)
+7. **Windows/paths:** two dev boxes are in use. The aarch64 Android (Termux)
    box needs `preprocess/.cargo/config.toml` (clang linker + `-L/system/lib64`)
    — already set; do not remove it (it only matches the
    `aarch64-linux-android` target, so it is inert on the x86_64 Linux desktop,

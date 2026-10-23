@@ -209,6 +209,163 @@ function applyMapMaterialLook(material: THREE.Material | THREE.Material[]): void
   }
 }
 
+/** Shape of the WorldVertexTransition metadata written by add_textures_glb. */
+interface SourceBlendInfo {
+  shader?: string;
+  channel?: string;
+  texture2Index?: number;
+}
+
+/**
+ * Carry over the surface flags that define how a material is drawn. The glTF
+ * loader encodes `alphaMode` as `alphaTest` (MASK) or
+ * `transparent`/`depthWrite` (BLEND); rebuilding a material without copying
+ * them made glass, grates and decals render opaque.
+ */
+function copySurfaceState(src: THREE.Material, dst: THREE.Material): void {
+  dst.name = src.name;
+  dst.side = src.side;
+  dst.alphaTest = src.alphaTest;
+  dst.transparent = src.transparent;
+  dst.opacity = src.opacity;
+  dst.premultipliedAlpha = src.premultipliedAlpha;
+  // MASK and opaque surfaces must write depth; BLEND normally should not.
+  // Opaque materials keep the depthWrite value authored by the loader.
+  dst.depthWrite = src.alphaTest > 0 ? true : src.transparent ? false : src.depthWrite;
+  dst.needsUpdate = true;
+}
+
+/** Re-apply only the depth policy to an already-existing material. */
+function refreshDepthPolicy(mat: THREE.Material): void {
+  if (mat.alphaTest > 0) mat.depthWrite = true;
+  else if (mat.transparent) mat.depthWrite = false;
+}
+
+/** Keep non-colour texture references that MeshBasicMaterial cannot consume. */
+function preserveUnsupportedMaps(
+  src: THREE.MeshStandardMaterial,
+  dst: THREE.MeshBasicMaterial,
+): void {
+  Object.assign(dst.userData, src.userData);
+  // MeshBasicMaterial has no normalMap slot. Keep the reference so the data is
+  // not silently dropped, but bump lighting is NOT applied here: the baked
+  // lightmap is flat. Keeping MeshStandardMaterial + lightMap would preserve
+  // normal maps but double-light the world with the sun, which is worse.
+  if (src.normalMap) dst.userData.normalMap = src.normalMap;
+}
+
+/**
+ * WorldVertexTransition (Source): the two textures are blended by the
+ * geometry's COLOR_0.r. add_textures_glb exposes texture 2 as `emissiveMap`
+ * (with an emissive factor of black), so it is not used as emission.
+ */
+function buildWorldVertexTransitionMaterial(
+  src: THREE.MeshStandardMaterial,
+  lightMap: THREE.Texture,
+  blendMap: THREE.Texture,
+): THREE.MeshBasicMaterial {
+  const basic = new THREE.MeshBasicMaterial({
+    map: src.map,
+    color: src.color,
+    // Source uses COLOR_0.r ONLY as the blend weight. three's vertexColors
+    // path would multiply the diffuse by rgb, so it must stay off and the
+    // attribute/varying are declared by the injected shader instead.
+    vertexColors: false,
+    lightMap,
+    side: src.side,
+    fog: src.fog,
+  });
+  copySurfaceState(src, basic);
+  basic.lightMapIntensity = Math.PI;
+  preserveUnsupportedMaps(src, basic);
+
+  // Both textures are sampled with map's UV set (vMapUv). Their own
+  // colorSpace drives three's sRGB internal-format decode, so no manual
+  // transfer function is needed there.
+  basic.onBeforeCompile = (shader) => {
+    shader.uniforms.blendMap = { value: blendMap };
+    shader.vertexShader = shader.vertexShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nattribute vec3 color;\nvarying float vWvtBlendWeight;',
+      )
+      .replace(
+        '#include <begin_vertex>',
+        '#include <begin_vertex>\nvWvtBlendWeight = color.r;',
+      );
+    shader.fragmentShader = shader.fragmentShader
+      .replace(
+        '#include <common>',
+        '#include <common>\nuniform sampler2D blendMap;\nvarying float vWvtBlendWeight;',
+      )
+      .replace(
+        '#include <map_fragment>',
+        `vec4 wvtFirst = vec4(1.0);
+vec4 wvtSecond = vec4(1.0);
+#ifdef USE_MAP
+  wvtFirst = texture2D(map, vMapUv);
+  wvtSecond = texture2D(blendMap, vMapUv);
+#endif
+float wvtWeight = clamp(vWvtBlendWeight, 0.0, 1.0);
+diffuseColor *= mix(wvtFirst, wvtSecond, wvtWeight);`,
+      );
+  };
+  basic.customProgramCacheKey = () => 'wvt-world-vertex-transition';
+  return basic;
+}
+
+/**
+ * Rebuild a baked world material as unlit MeshBasic. WVT materials get the
+ * two-texture blend; everything else keeps the plain base map.
+ */
+function createBakedWorldMaterial(
+  src: THREE.MeshStandardMaterial,
+  lightMap: THREE.Texture,
+  hasVertexColor: boolean,
+): THREE.MeshBasicMaterial {
+  const blend = src.userData?.sourceBlend as SourceBlendInfo | undefined;
+  if (
+    hasVertexColor &&
+    blend?.shader === 'WorldVertexTransition' &&
+    src.map &&
+    src.emissiveMap
+  ) {
+    return buildWorldVertexTransitionMaterial(src, lightMap, src.emissiveMap);
+  }
+
+  const basic = new THREE.MeshBasicMaterial({
+    map: src.map,
+    color: src.color,
+    vertexColors: src.vertexColors,
+    lightMap,
+    side: src.side,
+    fog: src.fog,
+  });
+  copySurfaceState(src, basic);
+  basic.lightMapIntensity = Math.PI;
+  preserveUnsupportedMaps(src, basic);
+  return basic;
+}
+
+/**
+ * Baked prop boxes carry their average light in COLOR_0 but have no uv1, so
+ * the lightmap atlas cannot be sampled on them. Keep them unlit and let the
+ * baked vertex colours replace the sun instead of double-lighting them.
+ */
+function createBakedPropMaterial(src: THREE.MeshStandardMaterial): THREE.MeshBasicMaterial {
+  const basic = new THREE.MeshBasicMaterial({
+    map: src.map,
+    color: src.color,
+    vertexColors: true,
+    // Deliberately no lightMap: without uv1 it would sample uv0 garbage.
+    side: src.side,
+    fog: src.fog,
+  });
+  copySurfaceState(src, basic);
+  preserveUnsupportedMaps(src, basic);
+  return basic;
+}
+
 async function loadMap(): Promise<void> {
   const loader = new GLTFLoader();
   const gltf = await loader.loadAsync(MAP_URL);
@@ -225,6 +382,13 @@ async function loadMap(): Promise<void> {
     // The baked bytes are display-referred (authored for gamma output), so
     // mark them sRGB: decode -> linear multiply -> re-encode stays identity.
     lightMap.colorSpace = THREE.SRGBColorSpace;
+    // The atlas packs 128 cells with 1px gutters: lower mips would blend
+    // neighbouring pages together, which Source never does — sample only mip 0.
+    lightMap.generateMipmaps = false;
+    lightMap.minFilter = THREE.LinearFilter;
+    lightMap.magFilter = THREE.LinearFilter;
+    lightMap.anisotropy = 1;
+    lightMap.needsUpdate = true;
   } catch {
     console.warn('[map] no lightmap atlas; falling back to lit shading');
   }
@@ -243,33 +407,52 @@ async function loadMap(): Promise<void> {
     } else {
       applyMapMaterialLook(material);
     }
-    // Baked lighting: ONLY meshes that carry TEXCOORD_1 (the world mesh;
-    // props/kits/foliage have no uv1 and must stay sun-lit). MeshBasic +
-    // lightMap renders the baked light directly — no double-lighting with
-    // the sun, which remains for players/props.
-    if (lightMap && obj.geometry.getAttribute('uv1')) {
+    // Baked lighting: ONLY meshes that carry TEXCOORD_1 (the world mesh) can
+    // sample the atlas. Props/kits/foliage have no uv1, so they keep their own
+    // lighting path (props use baked COLOR_0 below; kits/foliage stay lit).
+    // MeshBasic + lightMap renders the baked light directly — no
+    // double-lighting with the sun, which remains for players/kits/foliage.
+    const hasUv1 = Boolean(obj.geometry.getAttribute('uv1'));
+    const isPropsNode = obj.name.toLowerCase().includes('props');
+    if (lightMap && hasUv1) {
       const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
-      for (const mat of materials) {
+      const converted = materials.map((mat) => {
         if (mat instanceof THREE.MeshStandardMaterial) {
-          const basic = new THREE.MeshBasicMaterial({
-            map: mat.map,
-            color: mat.color,
-            vertexColors: mat.vertexColors,
-            lightMap,
-            side: mat.side,
-            fog: mat.fog,
-          });
-          // three.js multiplies the lightmap by RECIPROCAL_PI (1/pi) as the
-          // lambert indirect-diffuse normalisation; Source bakes the final
-          // display value already, so undo the 3.14x darkening here.
-          basic.lightMapIntensity = Math.PI;
+          const basic = createBakedWorldMaterial(mat, lightMap, hasColor);
           mat.dispose();
-          obj.material = basic;
-        } else if (mat instanceof THREE.MeshBasicMaterial) {
+          return basic;
+        }
+        if (mat instanceof THREE.MeshBasicMaterial) {
+          // Already unlit (e.g. KHR_materials_unlit). Keep the alpha flags the
+          // loader derived from glTF alphaMode; only attach the lightmap.
           mat.lightMap = lightMap;
           mat.lightMapIntensity = Math.PI;
+          refreshDepthPolicy(mat);
+          return mat;
         }
-      }
+        return mat;
+      });
+      obj.material = Array.isArray(obj.material) ? converted : converted[0];
+    } else if (lightMap && isPropsNode && hasColor) {
+      // Tools now bake average prop light into COLOR_0. Props have no uv1, so
+      // they would otherwise stay sun-lit MeshStandard and be double-lit.
+      const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+      const converted = materials.map((mat) => {
+        if (mat instanceof THREE.MeshStandardMaterial) {
+          const basic = createBakedPropMaterial(mat);
+          mat.dispose();
+          return basic;
+        }
+        if (mat instanceof THREE.MeshBasicMaterial) {
+          mat.vertexColors = true;
+          mat.lightMap = null;
+          refreshDepthPolicy(mat);
+          mat.needsUpdate = true;
+          return mat;
+        }
+        return mat;
+      });
+      obj.material = Array.isArray(obj.material) ? converted : converted[0];
     }
     obj.castShadow = true;
     obj.receiveShadow = true;

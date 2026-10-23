@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import sys
 
 SHADER_KEY = "_shader"
@@ -299,6 +300,35 @@ def is_translucent(mat: dict) -> bool:
     if _flag(mat, "$translucent"):
         return True
     return _flag(mat, "$alpha") and not _flag(mat, "$alphatest")
+
+
+def is_decal(mat: dict) -> bool:
+    """`$decal 1` — decal/overlay material, rendered with alpha blending."""
+    return _flag(mat, "$decal")
+
+
+def has_vertex_color(mat: dict) -> bool:
+    """`$vertexcolor 1` — the shader multiplies COLOR_0 into the albedo."""
+    return _flag(mat, "$vertexcolor")
+
+
+def has_vertex_alpha(mat: dict) -> bool:
+    """`$vertexalpha 1` — the shader takes opacity from COLOR_0.a."""
+    return _flag(mat, "$vertexalpha")
+
+
+def alpha_test_reference(mat: dict, default: float = 0.5) -> float:
+    """`$alphatestreference` as a glTF alphaCutoff, clamped to [0, 1]."""
+    value = mat.get("$alphatestreference")
+    if not isinstance(value, str):
+        return default
+    try:
+        ref = float(value.strip())
+    except ValueError:
+        return default
+    if not math.isfinite(ref):
+        return default
+    return min(1.0, max(0.0, ref))
 
 
 def main(argv: list[str]) -> int:

@@ -12,6 +12,11 @@ bufferViews and accessors are appended with byteOffsets past the current
 chunk length, so every existing bufferView/accessor keeps its byteOffset and
 index. Nothing in the world mesh is renumbered or rewritten.
 
+Each prop box vertex also gets a COLOR_0 tint: the palette colour multiplied
+by the baked average light of the nearest lightmapped face. This approximates
+Source's baked static-prop lighting cheaply (props in tunnels/under overhangs
+are no longer lit like outdoor props).
+
 Click-to-inspect metadata (`extras.props`) is attached to the node whose
 mesh is 0 (the world node) and stays in Source coordinates (Z-up).
 
@@ -91,6 +96,136 @@ def size_for(name: str):
         if any(k in n for k in keys):
             return size
     return DEFAULT_SIZE
+
+
+# ---------------------------------------------------------------------------
+# Baked static-prop lighting (approximation)
+# ---------------------------------------------------------------------------
+# StaticPropLump_t (TF2, game lump version 10, 72-byte stride). Byte offsets
+# verified against assets/pl_upward.bsp: m_LightingOrigin at 44 and the
+# 32-bit flags field at 64 (byte 31 is padding, its bytes are garbage).
+PROP_LIGHTING_ORIGIN_OFFSET = 44
+PROP_FLAGS_OFFSET = 64
+STATIC_PROP_USE_LIGHTING_ORIGIN = 0x2
+
+# Coarse spatial grid for nearest-face queries. 256 Source units keeps each
+# shell small; the expanding-ring search stays exact.
+LIGHT_GRID_CELL = 256.0
+LIGHT_GRID_MAX_RING = 64
+
+
+def decode_rgbexp32(lm: bytes, off: int, lut: bytes):
+    """Decode one ColorRGBExp32 and return sRGB floats in [0, 1].
+
+    Same formula as bsp2glb.build_lightmap_atlas: mantissa * 2**exponent / 255
+    followed by a gamma-1/2.2 encode, via bsp2glb's byte LUT. The exponent is
+    a signed int8.
+    """
+    e = lm[off + 3]
+    if e > 127:
+        e -= 256
+    base = (e + 128) * 256
+    return (lut[base + lm[off]] / 255.0,
+            lut[base + lm[off + 1]] / 255.0,
+            lut[base + lm[off + 2]] / 255.0)
+
+
+def face_light_centroids(bsp):
+    """Return [(x, y, z, r, g, b)] per lightmapped face.
+
+    Source stores the face's baked average light as a 4-byte ColorRGBExp32
+    immediately before the lightmap block, i.e. at `face.lightofs - 4`.
+    Centroid comes from the face polygon (surfedges), in Source coordinates.
+    """
+    lm = bsp.lump(probe.m.LUMP_LIGHTING)
+    lut = probe.m._lm_decode_lut()
+    vertices = bsp.vertices()
+    edges = bsp.edges()
+    surfedges = bsp.surfedges()
+    out = []
+    for face in bsp.faces():
+        lightofs = face[12]
+        if lightofs < 4 or lightofs + 4 > len(lm):
+            continue
+        first_edge, num_edges = face[3], face[4]
+        if num_edges < 3 or num_edges > 1024 or first_edge < 0:
+            continue
+        sx = sy = sz = 0.0
+        count = 0
+        ok = True
+        for j in range(num_edges):
+            se = surfedges[first_edge + j]
+            edge_index = se if se >= 0 else -se
+            if edge_index >= len(edges) // 2:
+                ok = False
+                break
+            vi = edges[edge_index * 2] if se >= 0 else edges[edge_index * 2 + 1]
+            if vi >= len(vertices) // 3:
+                ok = False
+                break
+            sx += vertices[vi * 3]
+            sy += vertices[vi * 3 + 1]
+            sz += vertices[vi * 3 + 2]
+            count += 1
+        if not ok or count == 0:
+            continue
+        r, g, b = decode_rgbexp32(lm, lightofs - 4, lut)
+        out.append((sx / count, sy / count, sz / count, r, g, b))
+    return out
+
+
+class FaceLightGrid:
+    """Nearest face-centroid lookup over a coarse uniform 3D grid."""
+
+    def __init__(self, cells, cell=LIGHT_GRID_CELL):
+        self.cell = cell
+        self.bins = {}
+        for c in cells:
+            key = (int(math.floor(c[0] / cell)),
+                   int(math.floor(c[1] / cell)),
+                   int(math.floor(c[2] / cell)))
+            self.bins.setdefault(key, []).append(c)
+
+    def nearest(self, p):
+        """Return (r, g, b) of the nearest centroid, or None if no faces."""
+        cell = self.cell
+        cx = int(math.floor(p[0] / cell))
+        cy = int(math.floor(p[1] / cell))
+        cz = int(math.floor(p[2] / cell))
+        best = None
+        best_d2 = float("inf")
+
+        def scan(dx, dy, dz):
+            nonlocal best, best_d2
+            for c in self.bins.get((cx + dx, cy + dy, cz + dz), ()):
+                d2 = ((c[0] - p[0]) ** 2 + (c[1] - p[1]) ** 2
+                      + (c[2] - p[2]) ** 2)
+                if d2 < best_d2:
+                    best_d2 = d2
+                    best = c
+
+        for ring in range(LIGHT_GRID_MAX_RING + 1):
+            if ring == 0:
+                scan(0, 0, 0)
+            else:
+                # Cells at Chebyshev distance `ring` from the query cell.
+                for dx in range(-ring, ring + 1):
+                    for dy in range(-ring, ring + 1):
+                        scan(dx, dy, ring)
+                        scan(dx, dy, -ring)
+                for dx in range(-ring + 1, ring):
+                    for dz in range(-ring + 1, ring):
+                        scan(dx, ring, dz)
+                        scan(dx, -ring, dz)
+            # Any cell not visited yet is at least ring*cell away.
+            if best is not None and best_d2 <= (ring * cell) ** 2:
+                break
+        return None if best is None else (best[3], best[4], best[5])
+
+
+def luminance(rgb) -> float:
+    """Rec. 709 relative luminance of a colour triple."""
+    return 0.2126 * rgb[0] + 0.7152 * rgb[1] + 0.0722 * rgb[2]
 
 
 def rotation_matrix(pitch: float, yaw: float, roll: float):
@@ -347,9 +482,17 @@ def main(argv) -> int:
     p_positions, p_normals, p_colors, p_indices = array("f"), array("f"), array("f"), array("I")
     f_positions, f_normals, f_colors, f_indices = array("f"), array("f"), array("f"), array("I")
 
+    # Baked lighting lookup: nearest lightmapped face centroid per prop.
+    face_lights = face_light_centroids(bsp)
+    light_grid = FaceLightGrid(face_lights)
+
     added = 0
     skipped = 0
     f_added = 0
+    tinted = 0
+    untinted = 0
+    lighting_origin_used = 0
+    tint_lums = []
 
     prop_entries = []
 
@@ -373,6 +516,26 @@ def main(argv) -> int:
         color = color_for(name)
         rot = rotation_matrix(pitch, yaw, roll)
 
+        # Baked light position: an explicitly authored lighting origin (only
+        # valid when the flag is set; otherwise the bytes are garbage), else
+        # the prop origin. Only 5 upward props set it.
+        light_pos = (ox, oy, oz)
+        flags = struct.unpack_from("<I", data, base + PROP_FLAGS_OFFSET)[0]
+        if flags & STATIC_PROP_USE_LIGHTING_ORIGIN:
+            lx, ly, lz = struct.unpack_from("<3f", data, base + PROP_LIGHTING_ORIGIN_OFFSET)
+            if all(math.isfinite(v) for v in (lx, ly, lz)):
+                light_pos = (lx, ly, lz)
+                lighting_origin_used += 1
+        tint = light_grid.nearest(light_pos)
+        if tint is None:
+            tint = (1.0, 1.0, 1.0)
+            untinted += 1
+        else:
+            tinted += 1
+            tint_lums.append(luminance(tint))
+        # COLOR_0 = palette colour * baked tint, both display-referred sRGB.
+        lit_color = (color[0] * tint[0], color[1] * tint[1], color[2] * tint[2])
+
         # Compact entry for the web click-to-inspect lookup. Name keeps the
         # full path minus the models/props_mining/ prefix; p is the box center
         # (Source coords, Z-up); s is the full size.
@@ -389,13 +552,13 @@ def main(argv) -> int:
 
         if is_foliage(name):
             emit_box(f_positions, f_normals, f_colors, f_indices,
-                     ox, oy, oz, rot, sx, sy, h, color)
+                     ox, oy, oz, rot, sx, sy, h, lit_color)
             f_added += 1
             added += 1
             continue
 
         emit_box(p_positions, p_normals, p_colors, p_indices,
-                 ox, oy, oz, rot, sx, sy, h, color)
+                 ox, oy, oz, rot, sx, sy, h, lit_color)
         added += 1
 
     # Append new meshes at the end of the BIN chunk; the existing world mesh
@@ -430,6 +593,13 @@ def main(argv) -> int:
     _wv, _wt = world_stats(gltf)
     print(f"props added: {added}, skipped: {skipped} (of {prop_count})", file=sys.stderr)
     print(f"foliage props: {f_added} (separate mesh)", file=sys.stderr)
+    print(f"prop lighting: {tinted} props tinted from {len(face_lights)} "
+          f"lightmapped faces, {untinted} without a nearby face (white), "
+          f"{lighting_origin_used} using a lighting origin", file=sys.stderr)
+    if tint_lums:
+        print(f"prop tint luminance: min={min(tint_lums):.3f} "
+              f"max={max(tint_lums):.3f} "
+              f"mean={sum(tint_lums) / len(tint_lums):.3f}", file=sys.stderr)
     print(f"extras entries: {len(prop_entries)}", file=sys.stderr)
     print(f"world mesh untouched: {_wv} vertices, {_wt} triangles "
           f"({len(gltf['meshes'][0]['primitives'])} primitives)", file=sys.stderr)

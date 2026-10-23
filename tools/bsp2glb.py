@@ -40,9 +40,22 @@ LUMP_LIGHTING = 8
 FACE_STRUCT = struct.Struct("<HBBihhhh4Bif4iiHHI")
 assert FACE_STRUCT.size == 56
 
-# texinfo_t is 72 bytes: 4*4 texture vecs, 4*4 lightmap vecs, flags, texdata
+# texinfo_t is 72 bytes: 4*4 texture vecs (32 B), 4*4 lightmap vecs (32 B),
+# then int flags at offset 64 and int texdata at offset 68 (Source bspfile.h).
+TEXINFO_FLAGS_OFFSET = 64
 TEXINFO_STRUCT = struct.Struct("<16fii")
-assert TEXINFO_STRUCT.size == 72
+assert TEXINFO_STRUCT.size == TEXINFO_FLAGS_OFFSET + 8  # flags + texdata
+TEXINFO_FLAGS_INDEX = TEXINFO_FLAGS_OFFSET // 4         # -> unpacked vals[16]
+
+# texinfo_t.flags bits (Source bspfile.h). These faces are not render
+# geometry: sky, invisible brushes, hint/skip compiler geometry, nodraw.
+SURF_SKY = 0x4
+SURF_WARP = 0x8        # water; KEPT for now — the water shader is still TODO
+SURF_TRANS = 0x10
+SURF_NODRAW = 0x20
+SURF_HINT = 0x40
+SURF_SKIP = 0x80
+SKIP_FACE_FLAGS = SURF_NODRAW | SURF_SKY | SURF_SKIP | SURF_HINT
 
 DISPINFO_STRUCT = struct.Struct("<3fiiii")  # start, firstvert, firsttri, power, minTess
 DISPINFO_SIZE = 176
@@ -165,10 +178,13 @@ class Bsp:
 # Palette
 # ---------------------------------------------------------------------------
 def palette_color(name: str):
-    """Return (r, g, b) or None for skipped tool/sky/nodraw materials."""
+    """Return a stand-in (r, g, b) for a material name.
+
+    This is only a fallback tint for untextured rendering; whether a face is
+    rendered at all is decided by its texinfo flags (see SKIP_FACE_FLAGS),
+    never by the material name.
+    """
     n = name.lower()
-    if "nodraw" in n or "tool" in n or "sky" in n:
-        return None
     if "wood" in n:
         return (0.46, 0.29, 0.14)
     if "metal" in n:
@@ -263,10 +279,12 @@ WHITE_CELL = 4           # reserved NxN texels at the origin for unlit faces
 def pack_lightmaps(rects):
     """Shelf-pack face lightmap rects into one atlas.
 
-    `rects` is [(key, w, h), ...]. Returns {key: (x, y, w, h)} in atlas
-    texels, where (x, y) is the first LUXEL of the cell (the gutter sits at
-    x-1/y-1). Unpackable rects (larger than the atlas) are absent; callers
-    must treat them as unlit.
+    `rects` is [(key, w, h), ...], where w/h are the cell sizes in TEXELS
+    (a face lightmap grid of size_x by size_y luxels occupies (size_x+1) by
+    (size_y+1) texels). Returns {key: (x, y, w, h)} in atlas texels, where
+    (x, y) is the first texel of the cell (the gutter sits at x-1/y-1).
+    Unpackable rects (larger than the atlas) are absent; callers must treat
+    them as unlit.
 
     Texels (0..WHITE_CELL-1) in both axes are reserved for the unlit white
     cell — placement starts right after it.
@@ -276,42 +294,95 @@ def pack_lightmaps(rects):
     y = WHITE_CELL
     row_h = 0
     for key, w, h in sorted(rects, key=lambda r: -r[2]):
-        if w > LM_ATLAS or h > LM_ATLAS:
+        # Cell occupies [x+gutter, x+gutter+w) x [y+gutter, y+gutter+h):
+        # the fit test must include the gutter on the far edge too, otherwise
+        # a cell ending exactly at the atlas edge is stored one texel past it.
+        if w + LM_GUTTER > LM_ATLAS or h + LM_GUTTER > LM_ATLAS:
             continue
-        if x + w > LM_ATLAS:  # start a new shelf
+        if x + w + LM_GUTTER > LM_ATLAS:  # start a new shelf
             y += row_h
             x = WHITE_CELL
             row_h = 0
-        if y + h > LM_ATLAS:
+        # Re-test both axes: after the shelf reset x may still be too large,
+        # and the new shelf may already be past the bottom edge.
+        if x + w + LM_GUTTER > LM_ATLAS or y + h + LM_GUTTER > LM_ATLAS:
             continue  # atlas exhausted; face stays unlit
         placed[key] = (x + LM_GUTTER, y + LM_GUTTER, w, h)
         x += w + LM_GUTTER
         row_h = max(row_h, h + LM_GUTTER)
+    # Invariant: every stored cell lies fully inside the atlas.
+    assert all(px >= LM_GUTTER and py >= LM_GUTTER
+               and px + pw <= LM_ATLAS and py + ph <= LM_ATLAS
+               for px, py, pw, ph in placed.values())
     return placed
+
+
+_LM_DECODE_LUT = None
+
+
+def _lm_decode_lut():
+    """Decode LUT for Source ColorRGBExp32 -> sRGB bytes.
+
+    The BSP lightmap lumps store ColorRGBExp32 luxels (Source SDK mathlib.h):
+    three mantissa bytes followed by a signed int8 exponent. Source decodes
+    them as linear = mantissa * 2**exponent / 255 and then applies its
+    gamma-2.2 table (LinearToVertexLight), so the byte written to the sRGB
+    atlas is round(clamp(linear)**(1/2.2) * 255). The table is indexed by
+    (exponent + 128) * 256 + mantissa.
+    """
+    global _LM_DECODE_LUT
+    if _LM_DECODE_LUT is None:
+        lut = bytearray(256 * 256)
+        inv_gamma = 1.0 / 2.2
+        for e in range(-128, 128):
+            scale = (2.0 ** e) / 255.0
+            base = (e + 128) * 256
+            for m in range(256):
+                lin = m * scale
+                if lin > 1.0:
+                    lin = 1.0
+                lut[base + m] = int(lin ** inv_gamma * 255.0 + 0.5)
+        _LM_DECODE_LUT = bytes(lut)
+    return _LM_DECODE_LUT
 
 
 def build_lightmap_atlas(bsp, placed, all_faces, atlas_buf):
     """Decode each placed face's lightmap rect into the atlas RGB buffer.
 
-    `placed` maps face_index -> (ax, ay, w, h) from pack_lightmaps();
-    `atlas_buf` is a mutable bytearray(LM_ATLAS*LM_ATLAS*3), pre-initialised
-    (the caller writes the reserved white cell before calling). Luxels are
-    BGRA; the atlas stores RGB.
+    `placed` maps face_index -> (ax, ay, w, h) from pack_lightmaps(), with
+    w/h in texels. A face lightmap grid is (size_x+1) x (size_y+1) luxels
+    with row stride size_x+1 (Source vrad lightmap.cpp allocates
+    nLuxels = (size[0]+1)*(size[1]+1)). `atlas_buf` is a mutable
+    bytearray(LM_ATLAS*LM_ATLAS*3), pre-initialised (the caller writes the
+    reserved white cell before calling). Luxels are ColorRGBExp32; the atlas
+    stores sRGB RGB.
+
+    Note: ColorRGBExp32 exponent byte read as signed via `e > 127: e -= 256`.
     """
     lm = bsp.lump(LUMP_LIGHTING)
     atlas = atlas_buf
-    for fi, (ax, ay, w, h) in placed.items():
+    lut = _lm_decode_lut()
+    for fi, (ax, ay, _w, _h) in placed.items():
         face = all_faces[fi]
         lo = face[12]
         if lo < 0:
             continue
-        for j in range(h):
-            src = lo + j * face[16] * 4
+        # +1: the luxel grid has one extra row/column beyond lightmapSize.
+        nx = face[16] + 1
+        ny = face[17] + 1
+        for j in range(ny):
+            src = lo + j * nx * 4
             dst = ((ay + j) * LM_ATLAS + ax) * 3
-            for k in range(w):
-                atlas[dst + k * 3] = lm[src + k * 4 + 2]
-                atlas[dst + k * 3 + 1] = lm[src + k * 4 + 1]
-                atlas[dst + k * 3 + 2] = lm[src + k * 4]
+            for k in range(nx):
+                s = src + k * 4
+                e = lm[s + 3]
+                if e > 127:  # signed int8 exponent
+                    e -= 256
+                off = (e + 128) * 256
+                p = dst + k * 3
+                atlas[p] = lut[off + lm[s]]
+                atlas[p + 1] = lut[off + lm[s + 1]]
+                atlas[p + 2] = lut[off + lm[s + 2]]
     return atlas_buf
 
 
@@ -465,13 +536,16 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
     dispinfo_raw = bsp.lump(LUMP_DISPINFO)
     dispverts_raw = bsp.lump(LUMP_DISP_VERTS)
 
-    # texinfo index -> (skip, color, texture name, texinfo texture vectors).
+    # texinfo index -> (color, name, s_vec, t_vec, lm_s, lm_t, width, height,
+    #                   skip). `skip` comes from the texinfo flags, not the
+    # material name.
     # texinfo_t: 8 floats of texture vecs (s.xyz, s.shift, t.xyz, t.shift),
-    # 8 floats of lightmap vecs, flags, texdata index.
+    # 8 floats of lightmap vecs, flags (offset 64), texdata index (offset 68).
     texinfo_cache = {}
     for ti in range(len(texinfo_raw) // TEXINFO_STRUCT.size):
         vals = TEXINFO_STRUCT.unpack_from(texinfo_raw, ti * TEXINFO_STRUCT.size)
         texdata_index = vals[-1]
+        flags = vals[TEXINFO_FLAGS_INDEX]
         if 0 <= texdata_index < len(texdata):
             name_index, width, height = texdata[texdata_index]
         else:
@@ -485,6 +559,7 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
         texinfo_cache[ti] = (
             palette_color(name), name, s_vec, t_vec, lm_s, lm_t,
             float(width or 1), float(height or 1),
+            bool(flags & SKIP_FACE_FLAGS),
         )
 
     def make_uv(texinfo):
@@ -520,10 +595,11 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
 
         Luxel coords come from the texinfo lightmap vectors
         (u = P·s + shift, in luxel units). The projection lives in the range
-        [mins, mins + size - 1] (mins = dface_t lightmapMins, frequently
+        [mins, mins + size] (mins = dface_t lightmapMins, frequently
         NEGATIVE — the grid extends half a luxel past the face edges), so the
-        atlas-relative coordinate is u - mins. Clamping stays as slack only.
-        Unlit faces map to the reserved white 2x2 cell at the atlas origin.
+        atlas-relative coordinate is u - mins. The face grid has (size_x+1) x
+        (size_y+1) luxels (Source vrad), so u/v are clamped to [0, size].
+        Unlit faces map to the reserved white cell at the atlas origin.
         """
         cell = lm_cells.get(face_index)
         sx, sy = face[16], face[17]
@@ -540,8 +616,9 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
             v = p[0] * ltv[0] + p[1] * ltv[1] + p[2] * ltv[2] + lty[0]
             u -= mins_x
             v -= mins_y
-            u = max(0.0, min(float(sx - 1), u))
-            v = max(0.0, min(float(sy - 1), v))
+            # The cell holds sx+1 by sy+1 texels, so u=sx is the last texel.
+            u = max(0.0, min(float(sx), u))
+            v = max(0.0, min(float(sy), v))
             ax, ay, _w, _h = cell
             # +0.5: texel-centre sampling of the luxel grid inside the atlas
             return ((ax + 0.5 + u) / LM_ATLAS, (ay + 0.5 + v) / LM_ATLAS)
@@ -641,7 +718,9 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
         steps = 1 << power
 
         positions = []
+        base_points = []
         offsets = []
+        alphas = []  # raw CDispVert alpha (0..255) per grid vertex
         for i in range(grid * grid):
             t1 = (i % grid) / steps
             t2 = (i // grid) / steps
@@ -656,11 +735,15 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
                       ad[1] + (bc[1] - ad[1]) * t2,
                       ad[2] + (bc[2] - ad[2]) * t2)
             vec = DISPVERT_STRUCT.unpack_from(dispverts_raw, (first_vert + i) * 20)
+            # DISPVERT is <5f>: vec3, dist, alpha. Source stores alpha in
+            # 0..255; it is the WorldVertexTransition blend weight.
             offset = (vec[0] * vec[3], vec[1] * vec[3], vec[2] * vec[3])
             positions.append((base_p[0] + offset[0],
                               base_p[1] + offset[1],
                               base_p[2] + offset[2]))
+            base_points.append(base_p)
             offsets.append(offset)
+            alphas.append(vec[4])
 
         # Smooth grid normals from neighbouring positions.
         normals = []
@@ -682,7 +765,16 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
 
         base = mesh.vertex_count
         for i, p in enumerate(positions):
-            mesh.add_vertex(p, normals[i], color, uv_of(p), lmap_of(p))
+            # COLOR_0.r of a displacement vertex is the WorldVertexTransition
+            # blend weight (Source semantics): alpha / 255, clamped to [0, 1].
+            # The raw alpha stays in `alphas` for later use; flat brush faces
+            # keep their palette/texture colour.
+            a = alphas[i] / 255.0
+            a = 0.0 if a < 0.0 else (1.0 if a > 1.0 else a)
+            # Source CalcDispSurfCoords interpolates lightmap coords over the
+            # BASE (undisplaced) quad, not the displaced positions.
+            mesh.add_vertex(p, normals[i], (a, a, a), uv_of(p),
+                            lmap_of(base_points[i]))
         for tri in displacement_triangles(power):
             a, b, c = tri
             ref = normals[a]
@@ -691,29 +783,32 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
 
     all_faces = list(bsp.faces())
 
-    # --- Lightmap atlas pass (must run before vertex emission) -------------
-    # Collect the faces that will actually emit geometry (same filters as the
-    # main loop), pack their lightmap rects, then emit TEXCOORD_1 alongside
-    # TEXCOORD_0 below.
-    def face_passes_filters(face, info):
-        if info is None or info[0] is None:
-            return False
-        plane_index = face[0]
-        if plane_index >= len(planes):
-            return False
-        poly = face_polygon(face)
-        if len(poly) < 3:
-            return False
-        if outside_world(poly):
-            return False
-        return True
-
-    emitted_indices = []
+    # --- Single face-selection pass ----------------------------------------
+    # The lightmap packer and the geometry emitter MUST agree on the emitted
+    # face set, so both use this one list. Faces are skipped by texinfo flags
+    # (SKIP_FACE_FLAGS), never by material name. SURF_WARP (water) is kept:
+    # the water shader is still TODO.
+    emitted = []  # (face_index, face, polygon)
     for fi, face in enumerate(all_faces):
         info = texinfo_cache.get(face[5])
-        if not face_passes_filters(face, info):
+        if info is None or info[8]:
+            skipped_faces += 1  # NODRAW / SKY / SKIP / HINT by flags
             continue
-        emitted_indices.append(fi)
+        plane_index = face[0]
+        if plane_index >= len(planes):
+            continue
+        poly = face_polygon(face)
+        if len(poly) < 3:
+            continue
+        if outside_world(poly):
+            skipped_outside += 1
+            continue
+        emitted.append((fi, face, poly))
+    emitted_indices = [e[0] for e in emitted]
+
+    # --- Lightmap atlas pass (must run before vertex emission) -------------
+    # Pack the lightmap rects of exactly the emitted faces, then emit
+    # TEXCOORD_1 alongside TEXCOORD_0 below.
 
     # Reserve a WHITE_CELLed white square at the origin for unlit faces
     # (lightofs = -1 or unpackable rects); pack_lightmaps starts after it.
@@ -732,39 +827,27 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
     for fi in emitted_indices:
         face = all_faces[fi]
         if face[12] >= 0 and 0 < face[16] <= LM_ATLAS and 0 < face[17] <= LM_ATLAS:
-            rects.append((fi, face[16], face[17]))
+            # Face lightmap grids are (size_x+1) x (size_y+1) luxels.
+            rects.append((fi, face[16] + 1, face[17] + 1))
     placed = pack_lightmaps(rects)
     lm_cells.update(placed)
 
     build_lightmap_atlas(bsp, placed, all_faces, white_cell)
     atlas_bytes = bytes(white_cell)
 
-    for fi, face in enumerate(all_faces):
-        tex_info = face[5]
-        info = texinfo_cache.get(tex_info)
-        if info is None or info[0] is None:
-            skipped_faces += 1
-            continue
-        color, name, s_vec, t_vec, lm_s, lm_t, width, height = info
+    for fi, face, poly in emitted:
+        info = texinfo_cache[face[5]]
+        color, name, s_vec, t_vec, lm_s, lm_t, width, height, _skip = info
         mesh = builders.get(name)
         if mesh is None:
             mesh = builders[name] = MeshBuilder()
         uv_of = make_uv((s_vec, t_vec, width, height))
         lmap_of = make_lmap(fi, face, lm_s, lm_t)
-        plane_index = face[0]
-        if plane_index >= len(planes):
-            continue
-        plane = planes[plane_index]
+        plane = planes[face[0]]
         face_normal = (plane[0], plane[1], plane[2])
         if face[1] == 1:  # side
             face_normal = (-face_normal[0], -face_normal[1], -face_normal[2])
         face_normal = normalize(face_normal)
-        poly = face_polygon(face)
-        if len(poly) < 3:
-            continue
-        if outside_world(poly):
-            skipped_outside += 1
-            continue
         if face[6] >= 0:
             if add_displacement(face, poly, face_normal, color, uv_of, lmap_of, mesh):
                 disp_faces += 1
@@ -774,7 +857,8 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
         flat_faces += 1
 
     print(f"faces: {flat_faces} flat, {disp_faces} displaced, "
-          f"{fallback_faces} displacement fallbacks, {skipped_faces} skipped tool/sky, "
+          f"{fallback_faces} displacement fallbacks, "
+          f"{skipped_faces} skipped (nodraw/sky/skip/hint), "
           f"{skipped_outside} skipped out-of-world, {len(builders)} materials, "
           f"{len(placed)} lightmapped",
           file=sys.stderr)

@@ -134,3 +134,26 @@ map's lighting — direct lights would double-light it, and basic materials
 ignore them by definition (props/players keep the sun). Rejected: embedding
 the atlas in the GLB (no glTF slot, parser hacks), MeshStandard+lightMap
 (needed manual sun disabling anyway, kept PBR cost for a fully baked mesh).
+
+## 2026-10-23: Source-fidelity pass (lightmap, WVT, alpha, prop light)
+Verified against the open Source SDK (`bsplib.cpp`, `radial.cpp`,
+`lightmap.cpp`, `color_conversion.cpp`, `builddisp.cpp`,
+`lightmappedgeneric_*`). Adopted: ColorRGBExp32 decode (mantissa * 2^e / 255,
+then sRGB encode) with a byte LUT; (size+1)^2 luxel grid with stride size+1;
+displacement lightmap UVs interpolated on the base quad; alpha MASK/BLEND from
+VMT flags; WVT blend weight in COLOR_0.r from CDispVert alpha.
+Rejected: reading luxels as BGRA (old code: red/blue swap + lost exponent,
+mean sRGB 163/139/118 instead of ~119/119/118); keeping MeshStandard+sun for
+baked props (double lighting). The atlas stays 2048 with a 1px gutter; the
+packer fit test now accounts for the gutter (previously 6 cells ended at
+texel 2048 = one past the row and wrapped).
+WVT transport hack: the second texture travels in glTF `emissiveTexture`
+with `emissiveFactor = 0` and `extras.sourceBlend`; MeshBasic ignores
+emissive, and the viewer reads it as the blend map. Rejected: a custom glTF
+extension (GLTFLoader would not load the texture), unused texture index in
+extras (index is not resolvable to a three texture after load).
+Prop lighting is an approximation: nearest lightmapped face's avg-light
+(`lightofs - 4`), using m_LightingOrigin only when STATIC_PROP_USE_LIGHTING_ORIGIN
+is set; no occlusion or normal weighting.
+Known gaps: $detail/$blendmodulatetexture, normal maps are stored but not
+shaded (MeshBasic has no normal slot), water/sky shaders, SURF_WARP shading.
