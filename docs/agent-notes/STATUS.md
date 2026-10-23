@@ -378,3 +378,16 @@ atlas (BSP lump 8, 15110 faces, ~1.2M luxels -> 2048^2 atlas, TEXCOORD_1 +
 lightMap on MeshStandardMaterial; 581 faces have no lightmap -> white),
 phase 4 = real prop meshes via props2glb.py + InstancedMesh (234 unique
 models / 1244 instances).
+
+## Session update — 2026-10-23 (final): lightmap format decoded, implementation parked
+- Map-render phases 1+2 shipped and user-confirmed (per-material GLB + UVs;
+  embedded brush textures). Commits 76223d5, 2eb3507, 90cf79a, 828efa7.
+- Phase 3 groundwork: BSP lightmap format fully decoded empirically on
+  upward — see docs/agent-notes/60-lightmap-format.md (dface_t fields,
+  4-byte BGRA luxels, contiguous rows, luxel-space projection via texinfo
+  lm vectors, loose atlas allocation). Implementation (atlas + TEXCOORD_1 +
+  web wiring) is the next session's first task; the note contains the sketch
+  and open questions (gamma, displaced faces, unlit-vs-standard choice).
+- Environment note: the OpenCode subagent free tier ran out mid-session;
+  the four partially-run agents' output was verified by hand before use
+  (all good), and the remaining work was done in the main session.
