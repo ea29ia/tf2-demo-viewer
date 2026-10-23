@@ -446,7 +446,8 @@ def write_glb(path: str, gltf: dict, bin_blob: bytes) -> None:
 def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
               skin: list[int], name: str,
               model_dir: str | None = None,
-              keep_alpha: bool = False) -> tuple[dict, bytes]:
+              keep_alpha: bool = False,
+              max_tex_size: int | None = None) -> tuple[dict, bytes]:
     """Build one GLB. Returns (gltf_json, binary).
 
     Source model space (from the VVD) is right-handed with up = +y, forward
@@ -458,6 +459,10 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
     the glTF alphaMode, and only translucent/alpha-tested materials keep the
     VTF alpha channel in the PNG. The player path (default) flattens alpha to
     opaque RGB because there it is a specular mask, not opacity.
+
+    `max_tex_size` (pixels) caps the embedded texture resolution, preserving
+    the aspect ratio and never upscaling. `None` (the player default) embeds
+    the native mip0 size.
     """
     positions: list[float] = []
     normals: list[float] = []
@@ -491,7 +496,8 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
         mode, cutoff = ("OPAQUE", None)
         if keep_alpha:
             mode, cutoff = textures.alpha_mode(vmt_path)
-        png = png_bytes(w, h, rgba, keep_alpha=keep_alpha and mode != "OPAQUE")
+        png = png_bytes(w, h, rgba, keep_alpha=keep_alpha and mode != "OPAQUE",
+                        max_size=max_tex_size)
         bin_chunks.append(png)
         images.append({
             "bufferView": len(bin_chunks) - 1,
@@ -696,8 +702,85 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
 import zlib  # noqa: E402
 
 
+def resize_rgba(width: int, height: int, rgba: bytes,
+                new_width: int, new_height: int) -> bytes:
+    """Bilinear RGBA resize, interpolating in premultiplied alpha space.
+
+    Downscaling only (callers must not request an upscale). Premultiplying
+    keeps fully transparent texels from bleeding their (undefined) colour
+    into visible ones, which would produce dark fringes on cutout props such
+    as foliage. Edge pixels are clamped.
+    """
+    if (new_width, new_height) == (width, height):
+        return rgba
+    # Precompute horizontal taps for every output column.
+    xmap: list[tuple[int, int, float]] = []
+    for x in range(new_width):
+        sx = (x + 0.5) * width / new_width - 0.5
+        x0 = math.floor(sx)
+        fx = sx - x0
+        if x0 < 0:
+            x0, fx = 0, 0.0
+        elif x0 >= width - 1:
+            x0, fx = width - 1, 0.0
+        xmap.append((x0, min(x0 + 1, width - 1), fx))
+
+    src = rgba
+    out = bytearray(new_width * new_height * 4)
+    for y in range(new_height):
+        sy = (y + 0.5) * height / new_height - 0.5
+        y0 = math.floor(sy)
+        fy = sy - y0
+        if y0 < 0:
+            y0, fy = 0, 0.0
+        elif y0 >= height - 1:
+            y0, fy = height - 1, 0.0
+        y1 = min(y0 + 1, height - 1)
+        row0 = y0 * width * 4
+        row1 = y1 * width * 4
+        out_row = y * new_width * 4
+        for x, (x0, x1, fx) in enumerate(xmap):
+            i00 = row0 + x0 * 4
+            i10 = row0 + x1 * 4
+            i01 = row1 + x0 * 4
+            i11 = row1 + x1 * 4
+            w00 = (1.0 - fx) * (1.0 - fy)
+            w10 = fx * (1.0 - fy)
+            w01 = (1.0 - fx) * fy
+            w11 = fx * fy
+            a00 = src[i00 + 3]
+            a10 = src[i10 + 3]
+            a01 = src[i01 + 3]
+            a11 = src[i11 + 3]
+            den = w00 * a00 + w10 * a10 + w01 * a01 + w11 * a11
+            o = out_row + x * 4
+            if den <= 0.0:
+                out[o:o + 4] = b"\0\0\0\0"
+                continue
+            out[o] = round((w00 * src[i00] * a00 + w10 * src[i10] * a10 +
+                            w01 * src[i01] * a01 + w11 * src[i11] * a11) / den)
+            out[o + 1] = round((w00 * src[i00 + 1] * a00 +
+                                w10 * src[i10 + 1] * a10 +
+                                w01 * src[i01 + 1] * a01 +
+                                w11 * src[i11 + 1] * a11) / den)
+            out[o + 2] = round((w00 * src[i00 + 2] * a00 +
+                                w10 * src[i10 + 2] * a10 +
+                                w01 * src[i01 + 2] * a01 +
+                                w11 * src[i11 + 2] * a11) / den)
+            out[o + 3] = round(den)
+    return bytes(out)
+
+
 def png_bytes(width: int, height: int, rgba: bytes,
-              keep_alpha: bool = False) -> bytes:
+              keep_alpha: bool = False,
+              max_size: int | None = None) -> bytes:
+    if max_size and max(width, height) > max_size:
+        scale = max_size / float(max(width, height))
+        new_width = max(1, int(round(width * scale)))
+        new_height = max(1, int(round(height * scale)))
+        rgba = resize_rgba(width, height, rgba, new_width, new_height)
+        width, height = new_width, new_height
+
     def chunk(kind: bytes, payload: bytes) -> bytes:
         body = kind + payload
         return struct.pack(">I", len(payload)) + body + struct.pack(

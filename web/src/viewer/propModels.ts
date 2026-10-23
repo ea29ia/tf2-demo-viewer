@@ -22,6 +22,7 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { BASE } from './state';
+import { hideFoliageInput } from './dom';
 
 const MODELS_BASE = `${BASE}models/props/`;
 const MANIFEST_URL = `${MODELS_BASE}manifest.json`;
@@ -38,6 +39,11 @@ interface PropExtrasEntry {
   k?: number;
   /** Full model id, e.g. "models/props_coalmines/boulder_pile2". */
   m?: string;
+  /**
+   * Foliage flag written by tools/add_props_glb.py via is_foliage(); the GLB
+   * is the single source of truth (absent on older extras => not foliage).
+   */
+  f?: boolean;
 }
 
 interface ManifestModel {
@@ -55,6 +61,8 @@ interface PlacedProp {
   origin: [number, number, number];
   angles: [number, number, number];
   scale: number;
+  /** True when the GLB extras carry `f: true` (hideable foliage prop). */
+  foliage: boolean;
 }
 
 /** Export (Y-up asset frame, up = +X for props) -> Source Z-up. */
@@ -124,6 +132,8 @@ export function collectPlacedProps(root: THREE.Object3D): PlacedProp[] {
         origin: [Number(e.o[0]), Number(e.o[1]), Number(e.o[2])],
         angles: [Number(e.a[0]), Number(e.a[1]), Number(e.a[2])],
         scale: k,
+        // Backward compatibility: extras from older exporters have no flag.
+        foliage: e.f === true,
       });
     }
   });
@@ -138,13 +148,18 @@ export function collectPlacedProps(root: THREE.Object3D): PlacedProp[] {
  * @param root       rotated map scene root; instanced meshes are added here.
  * @param extrasRoot object tree that carries the prop extras (usually the same
  *                   root, but kept separate because extras live on node 0).
- * @param onMeshes   called once with the instanced meshes that were added, so
- *                   the caller can register them for raycasts/wireframe.
+ * @param onMeshes   called once with the instanced meshes that were added:
+ *                   (visible map meshes, hideable foliage meshes). Registering
+ *                   the second list lets the hide-foliage checkbox and the
+ *                   wireframe toggle drive them like the baked foliage mesh.
  */
 export async function loadPropModels(
   root: THREE.Object3D,
   extrasRoot: THREE.Object3D,
-  onMeshes: (meshes: THREE.InstancedMesh[]) => void,
+  onMeshes: (
+    meshes: THREE.InstancedMesh[],
+    foliageMeshes: THREE.InstancedMesh[],
+  ) => void,
 ): Promise<void> {
   const placed = collectPlacedProps(extrasRoot);
   if (placed.length === 0) return;
@@ -170,21 +185,28 @@ export async function loadPropModels(
   const models = manifest.models;
 
   // Group placements by model so each GLB is loaded once and every repeating
-  // instance becomes one InstancedMesh draw call per mesh primitive.
-  const groups = new Map<string, PlacedProp[]>();
+  // instance becomes one InstancedMesh draw call per mesh primitive. Foliage
+  // and non-foliage placements are kept apart because an InstancedMesh has a
+  // single visibility state (the checkbox toggles foliage meshes only).
+  const groups = new Map<
+    string,
+    { model: string; foliage: boolean; list: PlacedProp[] }
+  >();
   for (const prop of placed) {
     if (!(prop.model in models)) continue;
-    const list = groups.get(prop.model);
-    if (list) list.push(prop);
-    else groups.set(prop.model, [prop]);
+    const key = `${prop.foliage ? 'f' : 'p'}:${prop.model}`;
+    const group = groups.get(key);
+    if (group) group.list.push(prop);
+    else groups.set(key, { model: prop.model, foliage: prop.foliage, list: [prop] });
   }
   if (groups.size === 0) return;
 
   const loader = new GLTFLoader();
   const added: THREE.InstancedMesh[] = [];
+  const addedFoliage: THREE.InstancedMesh[] = [];
 
   await Promise.all(
-    [...groups].map(async ([model, list]) => {
+    [...groups.values()].map(async ({ model, foliage, list }) => {
       const entry = models[model];
       const file = entry?.file;
       if (typeof file !== 'string' || !file) {
@@ -232,6 +254,9 @@ export async function loadPropModels(
         mesh.name = `propModel:${model}`;
         mesh.castShadow = true;
         mesh.receiveShadow = true;
+        // Foliage instances start in the state the hide-foliage checkbox is
+        // in; everything else is unconditionally visible.
+        mesh.visible = foliage ? !hideFoliageInput.checked : true;
         const matrix = new THREE.Matrix4();
         for (let i = 0; i < matrices.length; i++) {
           matrix.copy(matrices[i]).multiply(part.matrix);
@@ -240,15 +265,18 @@ export async function loadPropModels(
         mesh.instanceMatrix.needsUpdate = true;
         mesh.computeBoundingSphere();
         root.add(mesh);
-        added.push(mesh);
+        if (foliage) addedFoliage.push(mesh);
+        else added.push(mesh);
       }
     }),
   );
 
-  if (added.length > 0) {
-    onMeshes(added);
+  if (added.length > 0 || addedFoliage.length > 0) {
+    onMeshes(added, addedFoliage);
+    const drawCalls = added.length + addedFoliage.length;
     console.log(
-      `[props] instanced ${placed.length} placement(s) across ${groups.size} model(s) in ${added.length} draw call(s)`,
+      `[props] instanced ${placed.length} placement(s) across ${groups.size} model(s)` +
+        ` in ${drawCalls} draw call(s) (${addedFoliage.length} foliage)`,
     );
   }
 }

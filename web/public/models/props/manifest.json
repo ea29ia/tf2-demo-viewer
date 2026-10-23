@@ -4,6 +4,106 @@
       "file": "custom_train_bumper.glb",
       "tris": 4466
     },
+    "models/props_2fort/chalkboard01": {
+      "file": "props_2fort_chalkboard01.glb",
+      "tris": 488
+    },
+    "models/props_2fort/coffeemachine": {
+      "file": "props_2fort_coffeemachine.glb",
+      "tris": 1602
+    },
+    "models/props_2fort/coffeepot": {
+      "file": "props_2fort_coffeepot.glb",
+      "tris": 565
+    },
+    "models/props_2fort/corrugated_metal001": {
+      "file": "props_2fort_corrugated_metal001.glb",
+      "tris": 434
+    },
+    "models/props_2fort/corrugated_metal003": {
+      "file": "props_2fort_corrugated_metal003.glb",
+      "tris": 576
+    },
+    "models/props_2fort/corrugated_metal006": {
+      "file": "props_2fort_corrugated_metal006.glb",
+      "tris": 650
+    },
+    "models/props_2fort/corrugated_metal007": {
+      "file": "props_2fort_corrugated_metal007.glb",
+      "tris": 330
+    },
+    "models/props_2fort/fire_extinguisher": {
+      "file": "props_2fort_fire_extinguisher.glb",
+      "tris": 888
+    },
+    "models/props_2fort/grainconveyor001": {
+      "file": "props_2fort_grainconveyor001.glb",
+      "tris": 261
+    },
+    "models/props_2fort/groundlight001": {
+      "file": "props_2fort_groundlight001.glb",
+      "tris": 303
+    },
+    "models/props_2fort/hardhat001": {
+      "file": "props_2fort_hardhat001.glb",
+      "tris": 918
+    },
+    "models/props_2fort/hose001": {
+      "file": "props_2fort_hose001.glb",
+      "tris": 1795
+    },
+    "models/props_2fort/lunchbag": {
+      "file": "props_2fort_lunchbag.glb",
+      "tris": 204
+    },
+    "models/props_2fort/miningcrate001": {
+      "file": "props_2fort_miningcrate001.glb",
+      "tris": 620
+    },
+    "models/props_2fort/miningcrate002": {
+      "file": "props_2fort_miningcrate002.glb",
+      "tris": 629
+    },
+    "models/props_2fort/mop_and_bucket": {
+      "file": "props_2fort_mop_and_bucket.glb",
+      "tris": 1106
+    },
+    "models/props_2fort/oildrum": {
+      "file": "props_2fort_oildrum.glb",
+      "tris": 942
+    },
+    "models/props_2fort/pick001": {
+      "file": "props_2fort_pick001.glb",
+      "tris": 674
+    },
+    "models/props_2fort/roof_metal001": {
+      "file": "props_2fort_roof_metal001.glb",
+      "tris": 352
+    },
+    "models/props_2fort/roof_metal002": {
+      "file": "props_2fort_roof_metal002.glb",
+      "tris": 352
+    },
+    "models/props_2fort/roof_metal003": {
+      "file": "props_2fort_roof_metal003.glb",
+      "tris": 512
+    },
+    "models/props_2fort/sniper_fence02": {
+      "file": "props_2fort_sniper_fence02.glb",
+      "tris": 1839
+    },
+    "models/props_2fort/spytech_roofbeam01": {
+      "file": "props_2fort_spytech_roofbeam01.glb",
+      "tris": 1442
+    },
+    "models/props_2fort/tank002": {
+      "file": "props_2fort_tank002.glb",
+      "tris": 3463
+    },
+    "models/props_2fort/thermos": {
+      "file": "props_2fort_thermos.glb",
+      "tris": 400
+    },
     "models/props_2fort/trainwheel001": {
       "file": "props_2fort_trainwheel001.glb",
       "tris": 352
@@ -23,6 +123,10 @@
     "models/props_2fort/window004d_cluster01": {
       "file": "props_2fort_window004d_cluster01.glb",
       "tris": 512
+    },
+    "models/props_badlands/barrel01": {
+      "file": "props_badlands_barrel01.glb",
+      "tris": 640
     },
     "models/props_coalmines/boulder1": {
       "file": "props_coalmines_boulder1.glb",
@@ -108,9 +212,29 @@
       "file": "props_coalmines_boulder_pile2.glb",
       "tris": 1112
     },
+    "models/props_coalmines/foliage_clump1": {
+      "file": "props_coalmines_foliage_clump1.glb",
+      "tris": 113
+    },
+    "models/props_coalmines/foliage_clump2": {
+      "file": "props_coalmines_foliage_clump2.glb",
+      "tris": 98
+    },
+    "models/props_coalmines/foliage_clump3": {
+      "file": "props_coalmines_foliage_clump3.glb",
+      "tris": 49
+    },
+    "models/props_coalmines/foliage_single1": {
+      "file": "props_coalmines_foliage_single1.glb",
+      "tris": 16
+    },
     "models/props_coalmines/scaffolding1": {
       "file": "props_coalmines_scaffolding1.glb",
       "tris": 1072
+    },
+    "models/props_coalmines/upward_bridge_supports1": {
+      "file": "props_coalmines_upward_bridge_supports1.glb",
+      "tris": 1968
     },
     "models/props_coalmines/window2": {
       "file": "props_coalmines_window2.glb",
@@ -180,9 +304,93 @@
       "file": "props_coalmines_wood_support_256.glb",
       "tris": 654
     },
+    "models/props_farm/conduit02": {
+      "file": "props_farm_conduit02.glb",
+      "tris": 154
+    },
+    "models/props_farm/conduit_pipe02": {
+      "file": "props_farm_conduit_pipe02.glb",
+      "tris": 72
+    },
+    "models/props_farm/doorframe001a": {
+      "file": "props_farm_doorframe001a.glb",
+      "tris": 56
+    },
+    "models/props_farm/gutter_pipe_128": {
+      "file": "props_farm_gutter_pipe_128.glb",
+      "tris": 168
+    },
+    "models/props_farm/gutter_pipe_end": {
+      "file": "props_farm_gutter_pipe_end.glb",
+      "tris": 154
+    },
+    "models/props_farm/sewer_cap001a": {
+      "file": "props_farm_sewer_cap001a.glb",
+      "tris": 1056
+    },
+    "models/props_farm/sewer_grate_end01": {
+      "file": "props_farm_sewer_grate_end01.glb",
+      "tris": 720
+    },
+    "models/props_farm/spawnroom_door_left": {
+      "file": "props_farm_spawnroom_door_left.glb",
+      "tris": 624
+    },
+    "models/props_farm/spool_wire": {
+      "file": "props_farm_spool_wire.glb",
+      "tris": 232
+    },
+    "models/props_farm/tools_rack": {
+      "file": "props_farm_tools_rack.glb",
+      "tris": 156
+    },
+    "models/props_farm/tools_shovel": {
+      "file": "props_farm_tools_shovel.glb",
+      "tris": 278
+    },
+    "models/props_farm/welding_machine01": {
+      "file": "props_farm_welding_machine01.glb",
+      "tris": 1468
+    },
     "models/props_farm/wood_pile": {
       "file": "props_farm_wood_pile.glb",
       "tris": 324
+    },
+    "models/props_farm/wooden_barrel": {
+      "file": "props_farm_wooden_barrel.glb",
+      "tris": 746
+    },
+    "models/props_foliage/shrub_03_card": {
+      "file": "props_foliage_shrub_03_card.glb",
+      "tris": 128
+    },
+    "models/props_foliage/shrub_03_cluster": {
+      "file": "props_foliage_shrub_03_cluster.glb",
+      "tris": 1180
+    },
+    "models/props_foliage/shrub_03_cluster02": {
+      "file": "props_foliage_shrub_03_cluster02.glb",
+      "tris": 902
+    },
+    "models/props_foliage/shrub_03a": {
+      "file": "props_foliage_shrub_03a.glb",
+      "tris": 740
+    },
+    "models/props_foliage/shrub_03c": {
+      "file": "props_foliage_shrub_03c.glb",
+      "tris": 1642
+    },
+    "models/props_forest/bridge_support2": {
+      "file": "props_forest_bridge_support2.glb",
+      "tris": 172
+    },
+    "models/props_forest/chimney01": {
+      "file": "props_forest_chimney01.glb",
+      "tris": 588
+    },
+    "models/props_forest/sawmill_stairs": {
+      "file": "props_forest_sawmill_stairs.glb",
+      "tris": 1113
     },
     "models/props_forest/wood_patch1": {
       "file": "props_forest_wood_patch1.glb",
@@ -215,6 +423,258 @@
     "models/props_forest/wood_stairs96": {
       "file": "props_forest_wood_stairs96.glb",
       "tris": 290
+    },
+    "models/props_gameplay/door_grate002_floorplate": {
+      "file": "props_gameplay_door_grate002_floorplate.glb",
+      "tris": 50
+    },
+    "models/props_gameplay/door_grate002_frame": {
+      "file": "props_gameplay_door_grate002_frame.glb",
+      "tris": 88
+    },
+    "models/props_gameplay/door_grate003_floorplate": {
+      "file": "props_gameplay_door_grate003_floorplate.glb",
+      "tris": 50
+    },
+    "models/props_gameplay/door_grate003_frame": {
+      "file": "props_gameplay_door_grate003_frame.glb",
+      "tris": 88
+    },
+    "models/props_gameplay/door_slide_frame": {
+      "file": "props_gameplay_door_slide_frame.glb",
+      "tris": 292
+    },
+    "models/props_gameplay/door_slide_large": {
+      "file": "props_gameplay_door_slide_large.glb",
+      "tris": 1264
+    },
+    "models/props_gameplay/security_fence_light01": {
+      "file": "props_gameplay_security_fence_light01.glb",
+      "tris": 1418
+    },
+    "models/props_gameplay/sign_gameplay01": {
+      "file": "props_gameplay_sign_gameplay01.glb",
+      "tris": 390
+    },
+    "models/props_gameplay/towel_rack": {
+      "file": "props_gameplay_towel_rack.glb",
+      "tris": 936
+    },
+    "models/props_gameplay/uniform_locker": {
+      "file": "props_gameplay_uniform_locker.glb",
+      "tris": 9080
+    },
+    "models/props_gameplay/weight_scale": {
+      "file": "props_gameplay_weight_scale.glb",
+      "tris": 1414
+    },
+    "models/props_hydro/2pipe_straight_128": {
+      "file": "props_hydro_2pipe_straight_128.glb",
+      "tris": 576
+    },
+    "models/props_hydro/2pipe_straight_256": {
+      "file": "props_hydro_2pipe_straight_256.glb",
+      "tris": 960
+    },
+    "models/props_hydro/2pipe_straight_64": {
+      "file": "props_hydro_2pipe_straight_64.glb",
+      "tris": 512
+    },
+    "models/props_hydro/2pipe_turn_90": {
+      "file": "props_hydro_2pipe_turn_90.glb",
+      "tris": 1152
+    },
+    "models/props_hydro/3pipe_jog_64": {
+      "file": "props_hydro_3pipe_jog_64.glb",
+      "tris": 1632
+    },
+    "models/props_hydro/3pipe_straight_128": {
+      "file": "props_hydro_3pipe_straight_128.glb",
+      "tris": 864
+    },
+    "models/props_hydro/3pipe_straight_256": {
+      "file": "props_hydro_3pipe_straight_256.glb",
+      "tris": 1440
+    },
+    "models/props_hydro/3pipe_straight_64": {
+      "file": "props_hydro_3pipe_straight_64.glb",
+      "tris": 768
+    },
+    "models/props_hydro/3pipe_turn_90": {
+      "file": "props_hydro_3pipe_turn_90.glb",
+      "tris": 1728
+    },
+    "models/props_hydro/3pipe_turn_in": {
+      "file": "props_hydro_3pipe_turn_in.glb",
+      "tris": 960
+    },
+    "models/props_hydro/barrel_crate": {
+      "file": "props_hydro_barrel_crate.glb",
+      "tris": 1522
+    },
+    "models/props_hydro/barrel_crate_half": {
+      "file": "props_hydro_barrel_crate_half.glb",
+      "tris": 994
+    },
+    "models/props_hydro/construction_light": {
+      "file": "props_hydro_construction_light.glb",
+      "tris": 488
+    },
+    "models/props_hydro/wall_map": {
+      "file": "props_hydro_wall_map.glb",
+      "tris": 42
+    },
+    "models/props_lights/lamp001": {
+      "file": "props_lights_lamp001.glb",
+      "tris": 1132
+    },
+    "models/props_lights/light_cone_farm": {
+      "file": "props_lights_light_cone_farm.glb",
+      "tris": 216
+    },
+    "models/props_lights/light_cone_farm_32": {
+      "file": "props_lights_light_cone_farm_32.glb",
+      "tris": 216
+    },
+    "models/props_lights/light_fluorescent_basement": {
+      "file": "props_lights_light_fluorescent_basement.glb",
+      "tris": 200
+    },
+    "models/props_mining/barbfence001_reference": {
+      "file": "props_mining_barbfence001_reference.glb",
+      "tris": 1409
+    },
+    "models/props_mining/barbfence002_reference": {
+      "file": "props_mining_barbfence002_reference.glb",
+      "tris": 127
+    },
+    "models/props_mining/billboard001": {
+      "file": "props_mining_billboard001.glb",
+      "tris": 2500
+    },
+    "models/props_mining/ceiling_pipe01_thick": {
+      "file": "props_mining_ceiling_pipe01_thick.glb",
+      "tris": 280
+    },
+    "models/props_mining/ceiling_pipe02_thick": {
+      "file": "props_mining_ceiling_pipe02_thick.glb",
+      "tris": 340
+    },
+    "models/props_mining/ceiling_pipe04_thick": {
+      "file": "props_mining_ceiling_pipe04_thick.glb",
+      "tris": 340
+    },
+    "models/props_mining/ceiling_pipe06_thick": {
+      "file": "props_mining_ceiling_pipe06_thick.glb",
+      "tris": 710
+    },
+    "models/props_mining/ceiling_pipe_128_thick": {
+      "file": "props_mining_ceiling_pipe_128_thick.glb",
+      "tris": 80
+    },
+    "models/props_mining/ceiling_pipe_16_up_thick": {
+      "file": "props_mining_ceiling_pipe_16_up_thick.glb",
+      "tris": 220
+    },
+    "models/props_mining/ceiling_pipe_256_thick": {
+      "file": "props_mining_ceiling_pipe_256_thick.glb",
+      "tris": 80
+    },
+    "models/props_mining/ceiling_pipe_64_thick": {
+      "file": "props_mining_ceiling_pipe_64_thick.glb",
+      "tris": 60
+    },
+    "models/props_mining/computer_industrial02": {
+      "file": "props_mining_computer_industrial02.glb",
+      "tris": 1871
+    },
+    "models/props_mining/computer_industrial03": {
+      "file": "props_mining_computer_industrial03.glb",
+      "tris": 1113
+    },
+    "models/props_mining/computer_industrial04": {
+      "file": "props_mining_computer_industrial04.glb",
+      "tris": 1016
+    },
+    "models/props_mining/computer_industrial05": {
+      "file": "props_mining_computer_industrial05.glb",
+      "tris": 512
+    },
+    "models/props_mining/conduit_outdoor512": {
+      "file": "props_mining_conduit_outdoor512.glb",
+      "tris": 2128
+    },
+    "models/props_mining/crane001": {
+      "file": "props_mining_crane001.glb",
+      "tris": 820
+    },
+    "models/props_mining/crane001_small": {
+      "file": "props_mining_crane001_small.glb",
+      "tris": 820
+    },
+    "models/props_mining/crane002": {
+      "file": "props_mining_crane002.glb",
+      "tris": 670
+    },
+    "models/props_mining/crank01": {
+      "file": "props_mining_crank01.glb",
+      "tris": 626
+    },
+    "models/props_mining/crank02": {
+      "file": "props_mining_crank02.glb",
+      "tris": 610
+    },
+    "models/props_mining/factory_hatch001": {
+      "file": "props_mining_factory_hatch001.glb",
+      "tris": 1288
+    },
+    "models/props_mining/fence001_reference": {
+      "file": "props_mining_fence001_reference.glb",
+      "tris": 456
+    },
+    "models/props_mining/fence003_reference": {
+      "file": "props_mining_fence003_reference.glb",
+      "tris": 208
+    },
+    "models/props_mining/industrial_pipe01_128_01": {
+      "file": "props_mining_industrial_pipe01_128_01.glb",
+      "tris": 160
+    },
+    "models/props_mining/industrial_pipe01_256_01": {
+      "file": "props_mining_industrial_pipe01_256_01.glb",
+      "tris": 192
+    },
+    "models/props_mining/industrial_pipe01_l_128_01": {
+      "file": "props_mining_industrial_pipe01_l_128_01.glb",
+      "tris": 576
+    },
+    "models/props_mining/industrial_pipe01_l_160_01": {
+      "file": "props_mining_industrial_pipe01_l_160_01.glb",
+      "tris": 576
+    },
+    "models/props_mining/industrial_pipe01_s_01": {
+      "file": "props_mining_industrial_pipe01_s_01.glb",
+      "tris": 896
+    },
+    "models/props_mining/junctionbox01": {
+      "file": "props_mining_junctionbox01.glb",
+      "tris": 666
+    },
+    "models/props_mining/junctionbox02": {
+      "file": "props_mining_junctionbox02.glb",
+      "tris": 824
+    },
+    "models/props_mining/junctionbox03": {
+      "file": "props_mining_junctionbox03.glb",
+      "tris": 1068
+    },
+    "models/props_mining/sign001": {
+      "file": "props_mining_sign001.glb",
+      "tris": 286
+    },
+    "models/props_mining/support_wall001a": {
+      "file": "props_mining_support_wall001a.glb",
+      "tris": 304
     },
     "models/props_mining/track_arc_90degree_128": {
       "file": "props_mining_track_arc_90degree_128.glb",
@@ -260,9 +720,185 @@
       "file": "props_mining_track_y_joint_s_curve_96.glb",
       "tris": 3235
     },
+    "models/props_mining/truss008": {
+      "file": "props_mining_truss008.glb",
+      "tris": 1126
+    },
+    "models/props_mining/tunnel_truss01b": {
+      "file": "props_mining_tunnel_truss01b.glb",
+      "tris": 178
+    },
+    "models/props_spytech/bench001a": {
+      "file": "props_spytech_bench001a.glb",
+      "tris": 772
+    },
+    "models/props_spytech/bench001b": {
+      "file": "props_spytech_bench001b.glb",
+      "tris": 652
+    },
+    "models/props_spytech/binder001": {
+      "file": "props_spytech_binder001.glb",
+      "tris": 44
+    },
+    "models/props_spytech/computer_wall": {
+      "file": "props_spytech_computer_wall.glb",
+      "tris": 724
+    },
+    "models/props_spytech/computer_wall04": {
+      "file": "props_spytech_computer_wall04.glb",
+      "tris": 2180
+    },
+    "models/props_spytech/computer_wall05": {
+      "file": "props_spytech_computer_wall05.glb",
+      "tris": 350
+    },
+    "models/props_spytech/control_room_console01": {
+      "file": "props_spytech_control_room_console01.glb",
+      "tris": 1896
+    },
+    "models/props_spytech/control_room_console02": {
+      "file": "props_spytech_control_room_console02.glb",
+      "tris": 1246
+    },
+    "models/props_spytech/control_room_console03": {
+      "file": "props_spytech_control_room_console03.glb",
+      "tris": 1154
+    },
+    "models/props_spytech/corkboard01": {
+      "file": "props_spytech_corkboard01.glb",
+      "tris": 171
+    },
+    "models/props_spytech/doorframe002a": {
+      "file": "props_spytech_doorframe002a.glb",
+      "tris": 42
+    },
+    "models/props_spytech/doorframe002c": {
+      "file": "props_spytech_doorframe002c.glb",
+      "tris": 42
+    },
+    "models/props_spytech/doorframe004d": {
+      "file": "props_spytech_doorframe004d.glb",
+      "tris": 48
+    },
+    "models/props_spytech/fire_bell01": {
+      "file": "props_spytech_fire_bell01.glb",
+      "tris": 1084
+    },
+    "models/props_spytech/intercom": {
+      "file": "props_spytech_intercom.glb",
+      "tris": 566
+    },
+    "models/props_spytech/reel_rack01": {
+      "file": "props_spytech_reel_rack01.glb",
+      "tris": 1316
+    },
+    "models/props_spytech/siren001": {
+      "file": "props_spytech_siren001.glb",
+      "tris": 1994
+    },
+    "models/props_spytech/spytech_hanging_light_52": {
+      "file": "props_spytech_spytech_hanging_light_52.glb",
+      "tris": 746
+    },
+    "models/props_spytech/terminal_chair": {
+      "file": "props_spytech_terminal_chair.glb",
+      "tris": 1734
+    },
+    "models/props_spytech/vent_system_corner_small": {
+      "file": "props_spytech_vent_system_corner_small.glb",
+      "tris": 202
+    },
+    "models/props_spytech/vent_system_straight_128_small": {
+      "file": "props_spytech_vent_system_straight_128_small.glb",
+      "tris": 264
+    },
+    "models/props_spytech/vent_system_straight_256_small": {
+      "file": "props_spytech_vent_system_straight_256_small.glb",
+      "tris": 336
+    },
+    "models/props_spytech/vent_system_vent03": {
+      "file": "props_spytech_vent_system_vent03.glb",
+      "tris": 70
+    },
+    "models/props_spytech/wall_clock": {
+      "file": "props_spytech_wall_clock.glb",
+      "tris": 809
+    },
+    "models/props_spytech/watercooler": {
+      "file": "props_spytech_watercooler.glb",
+      "tris": 532
+    },
+    "models/props_spytech/work_table001": {
+      "file": "props_spytech_work_table001.glb",
+      "tris": 284
+    },
+    "models/props_trainyard/cart_base_separate": {
+      "file": "props_trainyard_cart_base_separate.glb",
+      "tris": 2732
+    },
+    "models/props_trainyard/cart_bomb_separate": {
+      "file": "props_trainyard_cart_bomb_separate.glb",
+      "tris": 1406
+    },
+    "models/props_trainyard/handrail128": {
+      "file": "props_trainyard_handrail128.glb",
+      "tris": 276
+    },
+    "models/props_trainyard/handrail216": {
+      "file": "props_trainyard_handrail216.glb",
+      "tris": 496
+    },
+    "models/props_trainyard/handrail28": {
+      "file": "props_trainyard_handrail28.glb",
+      "tris": 138
+    },
+    "models/props_trainyard/handrail480": {
+      "file": "props_trainyard_handrail480.glb",
+      "tris": 1104
+    },
+    "models/props_trainyard/handrail608": {
+      "file": "props_trainyard_handrail608.glb",
+      "tris": 1406
+    },
+    "models/props_trainyard/handrail_corner02": {
+      "file": "props_trainyard_handrail_corner02.glb",
+      "tris": 2818
+    },
+    "models/props_trainyard/handrail_stairs": {
+      "file": "props_trainyard_handrail_stairs.glb",
+      "tris": 190
+    },
+    "models/props_trainyard/handrailcorner": {
+      "file": "props_trainyard_handrailcorner.glb",
+      "tris": 1198
+    },
     "models/props_trainyard/train_billboard001": {
       "file": "props_trainyard_train_billboard001.glb",
       "tris": 1432
+    },
+    "models/props_ui/competitive_stage": {
+      "file": "props_ui_competitive_stage.glb",
+      "tris": 15280
+    },
+    "models/props_vehicles/mining_car_metal": {
+      "file": "props_vehicles_mining_car_metal.glb",
+      "tris": 1968
+    },
+    "models/props_vehicles/mining_cart_supplies001": {
+      "file": "props_vehicles_mining_cart_supplies001.glb",
+      "tris": 6584
+    },
+    "models/props_well/computer_cart01": {
+      "file": "props_well_computer_cart01.glb",
+      "tris": 2832
+    },
+    "models/props_well/computer_cart02": {
+      "file": "props_well_computer_cart02.glb",
+      "tris": 2022
+    },
+    "models/props_well/hand_truck01": {
+      "file": "props_well_hand_truck01.glb",
+      "tris": 1898
     }
   },
   "version": 1

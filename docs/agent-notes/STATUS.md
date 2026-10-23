@@ -19,6 +19,18 @@ https://github.com/ea29ia/tf2-demo-viewer (public).
 
 ## Working (verified 2026-10-21 with the exact commands below)
 
+- **All static props are real meshes (2026-10-23)**: 225 of 234 placed models
+  exported (9 skybox models intentionally excluded), 0 failures, manifest 225
+  entries. Embedded prop textures are capped at 512 px (`--tex-size`, bilinear,
+  premultiplied-alpha downscale) — the directory is 43.2 MiB instead of the
+  ~100 MiB native-res estimate, and every GLB tops out at 512x512. The map GLB
+  now omits **all 1182** prop boxes (props/foliage meshes are gone; only world +
+  kits remain). Foliage props carry `"f": true` in extras; the viewer routes
+  their instanced meshes into `state.foliageMeshes`, so the hide-foliage
+  checkbox applies to real models too. Verified: GLB chain + `validate_glb.py`
+  PASS (44830 tris, 21.2 MiB), `tsc --noEmit`/`npm run build` exit 0, scout
+  player GLBs byte-identical. HUMAN visual check still required.
+
 - **Prop mesh batch 2 — track/wood/window/train/scaffolding (2026-10-23)**:
   `props2glb.py` gained `--exclude`; 45 more models exported (16.8 MiB,
   0 failures, manifest = 66 entries / 36.9 MiB). Prop exports now carry

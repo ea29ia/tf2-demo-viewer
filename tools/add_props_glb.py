@@ -573,6 +573,7 @@ def main(argv) -> int:
 
         color = color_for(name)
         rot = rotation_matrix(pitch, yaw, roll)
+        foliage = is_foliage(name)
 
         # Baked light position: an explicitly authored lighting origin (only
         # valid when the flag is set; otherwise the bytes are garbage), else
@@ -604,7 +605,7 @@ def main(argv) -> int:
                 short = short[len(prefix):]
                 break
         model_id = model_id_for(name)
-        prop_entries.append({
+        prop_entry = {
             "n": short,
             "p": [round(ox, 1), round(oy, 1), round(oz + h / 2.0, 1)],
             "s": [sx, sy, h],
@@ -612,14 +613,19 @@ def main(argv) -> int:
             "a": [pitch, yaw, roll],
             "k": uniform_scale,
             "m": model_id,
-        })
+        }
+        # Foliage flag: lets the viewer route the real mesh into its hideable
+        # foliage group. Omitted (not written as false) when not foliage.
+        if foliage:
+            prop_entry["f"] = True
+        prop_entries.append(prop_entry)
 
         # Models exported as real meshes are drawn by the viewer, not as boxes.
         if model_id in mesh_models:
             mesh_skipped += 1
             continue
 
-        if is_foliage(name):
+        if foliage:
             emit_box(f_positions, f_normals, f_colors, f_indices,
                      ox, oy, oz, rot, sx, sy, h, lit_color)
             f_added += 1

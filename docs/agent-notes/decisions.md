@@ -188,3 +188,15 @@ the VMT (opt-in keep_alpha), while the player path still strips alpha (it is a
 phong mask there). Window prop materials are OPAQUE in Source
 (`$basemapalphaphongmask`, no $translucent), so opaque glass is correct, not a
 bug. Player regression: scout red/blue GLBs byte-identical.
+
+## 2026-10-23: all props exported, 512px texture budget
+225/234 placed models exported in one pass (`--match . --exclude skybox`);
+the 9 excluded ones are 3D-skybox models that are culled from the map anyway.
+Prop textures are capped at 512 px by a new `--tex-size` (default 512 for
+prop exports, None for players): bilinear resize in premultiplied-alpha space
+so cutout foliage keeps clean edges. Measured dir: 43.2 MiB (43 197 KiB),
+largest embedded PNG 512x512; without the cap the estimate was >100 MiB and
+the viewer loads every model at startup. Re-exporting the existing batches at
+512 is intentional (uniform budget); scout player GLBs remain byte-identical.
+Foliage detection stays in add_props_glb (`is_foliage`) and is published to
+the viewer as extras `"f": true`, avoiding a duplicated keyword list in TS.

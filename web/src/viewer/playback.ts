@@ -480,8 +480,9 @@ async function loadMap(): Promise<void> {
   // Real prop meshes: props whose model exists in the props manifest have no
   // box geometry in the GLB, so load the exported GLBs and instance them.
   // Fire-and-forget: a missing manifest/model just leaves the boxes in place.
-  void loadPropModels(gltf.scene, gltf.scene, (meshes) => {
+  void loadPropModels(gltf.scene, gltf.scene, (meshes, foliageMeshes) => {
     state.mapMeshes.push(...meshes);
+    state.foliageMeshes.push(...foliageMeshes);
     // The checkbox may have been toggled while the models were loading.
     if (wireframeInput.checked) applyWireframe();
   });

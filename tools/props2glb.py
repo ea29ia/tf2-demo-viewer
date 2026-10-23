@@ -8,6 +8,7 @@ Two subcommands:
                                      [--top 5] [--model models/props_2fort/oildrum]
                                      [--match REGEX[,REGEX...]]
                                      [--exclude REGEX[,REGEX...]]
+                                     [--tex-size N]
 
 `list` parses the sprp game lump through tools/probe_props.py (the same path
 tools/add_props_glb.py uses), counts prop instances per model and prints the
@@ -26,6 +27,11 @@ after `--match` (e.g. `--exclude skybox`). Anchor a pattern with a leading
 slash to match the basename only: `--match '/(train|wood_)'` does not match
 `models/props_trainyard/handrail28`, because the slash must directly precede
 the matched prefix.
+
+`--tex-size` caps the embedded texture resolution in pixels (default 512,
+`0` keeps the native mip0 size). The cap preserves the aspect ratio, never
+upscales, and uses a bilinear filter that keeps alpha, so a map-wide export
+stays small enough to load every prop mesh at once.
 
 `export` runs the mdl2glb.py geometry pipeline (MDL v48 + VVD + dx90 VTX) in
 prop mode: skin family 0 only, one GLB per model, no red/blue team split,
@@ -310,7 +316,7 @@ def read_model_parts(tf_dir: str, model: str, misc) -> tuple:
 
 
 def export_model(tf_dir: str, model: str, out_path: str,
-                 textures: PropTextures, misc) -> dict:
+                 textures: PropTextures, misc, tex_size: int = 512) -> dict:
     """Convert one prop model to a single GLB. Returns a stats dict."""
     started = time.time()
     stats: dict = {
@@ -352,7 +358,7 @@ def export_model(tf_dir: str, model: str, out_path: str,
         skin = mdl.skins[0] if mdl.skins else []
         gltf, blob = mdl2glb.build_glb(
             mdl, vvd, vtx_lod, textures, skin, model, model_dir=model,
-            keep_alpha=True)
+            keep_alpha=True, max_tex_size=tex_size or None)
         mdl2glb.write_glb(out_path, gltf, blob)
 
         accessors = gltf["accessors"]
@@ -555,7 +561,7 @@ def cmd_list(bsp_path: str, top: int) -> int:
 
 def cmd_export(bsp_path: str, tf_dir: str, out_dir: str, top: int | None,
                explicit: list[str], patterns: list[str],
-               exclude_patterns: list[str]) -> int:
+               exclude_patterns: list[str], tex_size: int = 512) -> int:
     names, counts, prop_count = enumerate_props(bsp_path)
     print(f"BSP: {bsp_path}")
     print(f"prop instances: {prop_count}, placed models: {len(counts)}")
@@ -564,14 +570,16 @@ def cmd_export(bsp_path: str, tf_dir: str, out_dir: str, top: int | None,
     excludes = compile_matches(exclude_patterns)
     targets = select_targets(names, counts, top, explicit, compiled, excludes)
 
-    print(f"exporting {len(targets)} model(s) to {out_dir}")
+    print(f"exporting {len(targets)} model(s) to {out_dir} "
+          f"(texture cap: {'native' if tex_size <= 0 else str(tex_size) + ' px'})")
     misc = mdl2glb.vpk.open_pack(tf_dir, "tf2_misc")
     textures = PropTextures(tf_dir)
 
     rows = []
     for model in targets:
         out_path = os.path.join(out_dir, sanitised_name(model))
-        stats = export_model(tf_dir, model, out_path, textures, misc)
+        stats = export_model(tf_dir, model, out_path, textures, misc,
+                             tex_size=tex_size)
         print()
         print_stats(stats)
         rows.append(stats)
@@ -599,7 +607,7 @@ USAGE = """usage:
   props2glb.py <map.bsp> list [--top N]
   props2glb.py <map.bsp> export --tf <tf_dir> --out <dir>
                                [--top N] [--model M ...] [--match REGEX[,REGEX...]]
-                               [--exclude REGEX[,REGEX...]]"""
+                               [--exclude REGEX[,REGEX...]] [--tex-size N]"""
 
 
 def main(argv: list[str]) -> int:
@@ -615,12 +623,19 @@ def main(argv: list[str]) -> int:
     explicit: list[str] = []
     match_values: list[str] = []
     exclude_values: list[str] = []
+    tex_size = 512
     i = 0
     while i < len(rest):
         arg = rest[i]
         if arg == "--top" and i + 1 < len(rest):
             top = int(rest[i + 1])
             top_given = True
+            i += 2
+        elif arg == "--tex-size" and i + 1 < len(rest):
+            tex_size = int(rest[i + 1])
+            if tex_size < 0:
+                print(f"--tex-size must be >= 0\n{USAGE}", file=sys.stderr)
+                return 2
             i += 2
         elif arg == "--tf" and i + 1 < len(rest):
             tf_dir = rest[i + 1]
@@ -666,7 +681,7 @@ def main(argv: list[str]) -> int:
                 return 2
         return cmd_export(bsp_path, tf_dir, out_dir,
                           top if top_given else None, explicit, match_values,
-                          exclude_values)
+                          exclude_values, tex_size)
     print(f"unknown command {command!r}\n{USAGE}", file=sys.stderr)
     return 2
 
