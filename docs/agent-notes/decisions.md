@@ -118,3 +118,10 @@ verified pass).
 pl_upward: 234 unique models / 1244 sprp instances (vs 88 unique / 123 refs
 in the entity lump — that only lists prop_* entities). All prop planning
 counts come from probe_props.py's sprp parse, not the entity lump.
+
+## 2026-10-23: brush textures embedded as per-material PNGs (no atlas)
+Tiling textures rule out atlasing (REPEAT wrap needed), so each texdata
+material gets its own PNG inside the GLB: 512^2 for the high-area materials
+(painted area >= 200k u^2), 256^2 for the rest — 16.2 MiB GLB, user set no
+hard size limit. Rejected: 1024 native (56.5 MiB raw, >100 MiB GLB), atlas
+(breaks tiling), serving loose PNGs (two round trips, cache discipline).

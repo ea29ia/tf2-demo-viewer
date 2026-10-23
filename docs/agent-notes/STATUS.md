@@ -324,3 +324,32 @@ and "all 234 prop models, gradually".
   This closes the pending verification from the texture-fix session; the
   [dbg] console.log line was removed from web/public/modelview.html in the
   same commit. No further texture-pipeline work is blocked.
+
+## Session update — 2026-10-23 (evening): brush textures EMBEDDED in map GLB
+- **Player textures confirmed by the user** (Firefox, modelview.html) — [dbg]
+  log removed from modelview.html (commit 2eb3507). Texture pipeline closed.
+- **tools/add_textures_glb.py (new)**: resolves each world material's VMT
+  (BSP pak -> tf2_misc -> loose) and $basetexture VTF (pak -> tf2_textures ->
+  loose), decodes mip 0, downscales (512^2 for materials with painted area
+  >= 200k u^2, else 256^2), embeds PNGs into the GLB (images/textures/samplers
+  appended, PNG bytes appended to BIN; geometry untouched). COLOR_0 of
+  textured materials is neutralised to 1.0 IN PLACE (glTF multiplies vertex
+  colors into base color; the palette stand-in would darken the real
+  texture). KHR_materials_unlit for UnlitGeneric signs.
+- **vtf.py**: added decode_vtf_scaled(data, max_size) (integer box downscale)
+  + write_png_bytes. decode_vtf behaviour unchanged.
+- **Result on upward**: 71/72 materials textured (only DEV/REFLECTIVITY_30
+  has no VMT — stays vertex-grey), 70 unique PNGs, final GLB 16.23 MiB,
+  validate_glb.py PASS (43994 + 13560 + 624 + 360 tris). UV texel scale
+  verified against the BSP: |s|/|t| = 4 texels per world unit on 14662 faces
+  (Source's 0.25 u/texel convention).
+- **Verified in headless chromium**: map renders textured (wood fence,
+  grass/dirt ground blend, brick/concrete walls), no page errors, [inspect]
+  prop entries 1212. USER eyeball round on real Firefox still pending
+  (heuristic #7) — check orientation of known signs and overall brightness.
+- **Chain recipe is now five steps** (AGENTS.md recipe update pending):
+  bsp2glb -> add_textures -> add_props -> add_kits -> validate. Order matters:
+  add_textures right after bsp2glb (it only touches world materials).
+- **Next**: lightmap atlas (phase 3), prop InstancedMesh (phase 4,
+  props2glb.py ready), WorldVertexTransition blending (phase 5), skybox
+  (phase 6). Runtime ~105 s for add_textures (70 PNG encodes, zlib -9).

@@ -203,7 +203,47 @@ def decode_vtf(data: bytes) -> tuple[int, int, bytes]:
     return width, height, bytes(rgba)
 
 
-def write_png(path: str, width: int, height: int, rgba: bytes) -> None:
+def _box_downscale(rgba: bytes, w: int, h: int, tw: int, th: int) -> bytes:
+    """Integer-factor box filter: w x h RGBA -> tw x th RGBA."""
+    fx, fy = w // tw, h // th
+    if fx <= 1 and fy <= 1:
+        return rgba
+    out = bytearray(tw * th * 4)
+    for ty in range(th):
+        for tx in range(tw):
+            r = g = b_ = a = n = 0
+            for sy in range(ty * fy, (ty + 1) * fy):
+                row = sy * w
+                for sx in range(tx * fx, (tx + 1) * fx):
+                    k = (row + sx) * 4
+                    r += rgba[k]
+                    g += rgba[k + 1]
+                    b_ += rgba[k + 2]
+                    a += rgba[k + 3]
+                    n += 1
+            k = (ty * tw + tx) * 4
+            out[k:k + 4] = bytes((r // n, g // n, b_ // n, a // n))
+    return bytes(out)
+
+
+def decode_vtf_scaled(data: bytes, max_size: int) -> tuple[int, int, bytes]:
+    """Decode mip 0 and box-downscale so max(w, h) <= max_size.
+
+    Only integer power-of-two reduction steps are used (matching the mip
+    chain), so quality stays clean. Returns the FINAL (possibly reduced)
+    dimensions. Raises the same VtfError variants as decode_vtf.
+    """
+    w, h, rgba = decode_vtf(data)
+    tw, th = w, h
+    while max(tw, th) > max_size:
+        tw = max(1, tw // 2)
+        th = max(1, th // 2)
+    if (tw, th) == (w, h):
+        return w, h, rgba
+    return tw, th, _box_downscale(rgba, w, h, tw, th)
+
+
+def write_png_bytes(width: int, height: int, rgba: bytes) -> bytes:
     def chunk(kind: bytes, payload: bytes) -> bytes:
         body = kind + payload
         return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
@@ -216,8 +256,12 @@ def write_png(path: str, width: int, height: int, rgba: bytes) -> None:
     png += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0))
     png += chunk(b"IDAT", zlib.compress(bytes(raw), 9))
     png += chunk(b"IEND", b"")
+    return bytes(png)
+
+
+def write_png(path: str, width: int, height: int, rgba: bytes) -> None:
     with open(path, "wb") as f:
-        f.write(png)
+        f.write(write_png_bytes(width, height, rgba))
 
 
 def main(argv: list[str]) -> int:

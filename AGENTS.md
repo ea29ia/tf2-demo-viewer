@@ -63,10 +63,14 @@ viewer/
 Map GLB from scratch:
 ```
 python3 tools/bsp2glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
+python3 tools/add_textures_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
 python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
 python3 tools/add_kits_glb.py web/public/maps/pl_upward.glb web/public/maps/kits.json
 python3 tools/validate_glb.py web/public/maps/pl_upward.glb
 ```
+(add_textures_glb.py needs the local TF2 install for VPK textures; it
+appends images to the GLB and neutralises vertex colors on textured
+materials — run it right after bsp2glb, BEFORE add_props_glb.py.)
 
 Replay from a demo:
 ```
