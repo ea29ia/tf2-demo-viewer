@@ -73,7 +73,7 @@ Map GLB from scratch:
 ```
 python3 tools/bsp2glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
 python3 tools/add_textures_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
-python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
+python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb web/public/models/props/manifest.json
 python3 tools/add_kits_glb.py web/public/maps/pl_upward.glb web/public/maps/kits.json
 python3 tools/validate_glb.py web/public/maps/pl_upward.glb
 ```

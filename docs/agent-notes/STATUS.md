@@ -177,7 +177,7 @@ python3 validate.py ../web/public/replay/replay.bin ../web/public/replay/meta.js
 
 # tools or map changed:
 python3 tools/bsp2glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
-python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
+python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb web/public/models/props/manifest.json
 python3 tools/add_kits_glb.py web/public/maps/pl_upward.glb web/public/maps/kits.json
 python3 tools/validate_glb.py web/public/maps/pl_upward.glb                          # → PASS
 
@@ -519,3 +519,14 @@ duplicate PNGs — 35 MiB bloated intermediate caught and discarded).
 Verified: `validate_glb.py` PASS (18.81 MiB, 59014 tris), ground WVT
 materials now have no normalTexture, `rockwall001_normal` (B-mean 243) kept.
 USER eyeball pending.
+
+## Session update — 2026-10-23 (follow-up): gray boxes regression — manifest arg was dropped
+
+User report after the ground fix: "some props are gray cubes again". Cause:
+the from-scratch GLB rebuild ran `add_props_glb.py` WITHOUT the third
+(manifest) argument, so all 1182 prop boxes were re-emitted, including the
+462+ that real meshes replace — boxes render around/over the loaded meshes.
+Fixed by re-running the full chain with
+`web/public/models/props/manifest.json`: all 1182 boxes omitted again, GLB =
+world + kits only (18.32 MiB, 44830 tris, validate PASS). AGENTS.md and the
+STATUS validation recipe now carry the manifest arg explicitly.
