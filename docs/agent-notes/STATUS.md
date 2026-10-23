@@ -238,12 +238,14 @@ cd web && npx tsc --noEmit && npm run build
 
 ## 2026-10-22: offline TF2 data copy for phone-based development
 
-- `~/Documents/tf2/` (287 MB) now holds an offline subset of the Steam TF2
+- `~/Documents/tf2/` (328 MB) now holds an offline subset of the Steam TF2
   install, used when the desktop is unavailable:
   - `tf/materials/`, `tf/models/` — exactly the files mdl2glb needs: the 9
     base player models (mdl/vvd/dx90/dx80/sw.vtx), hwm variants, all
     materials/models/player VMTs, and all non-item VTFs for player
     materials (~117 MB; the `items/` cosmetics subtree was skipped).
+  - `tf/models/player/*_animations.mdl` (9 files, 44 MB) — the composite
+    animation libraries; needed for future sequence/skinning work.
   - `demos/` — demp.dem, demp_2.dem, pocket.dem, pocket1.dem, fix.dem.
   - `assets/pl_upward.bsp` already lives in the repo working tree.
 - `tools/vpk.py` gained `LoosePack` + `open_pack(tf_dir, name)`: plain
@@ -253,3 +255,27 @@ cd web && npx tsc --noEmit && npm run build
 - Usage from the offline copy:
   `python3 tools/mdl2glb.py ~/Documents/tf2/tf models/player/<cls> web/public/models/players/<cls>`
   (demoman dir is `models/player/demo`).
+
+## Session update — 2026-10-23: consistency audit + animation data staged
+
+- **Docs audit**: found and fixed a real contradiction in
+  `40-vpk-mdl-pipeline.md` — its gotcha said "mip 0 is FIRST after the
+  header", which is the exact bug fixed in 706c28b (mip chain is
+  smallest-first; mip 0 is last). The note predates the fix and was written
+  while the decoder was still wrong. Rewritten to match decisions.md.
+- **Animation data staged** into the offline copy: `~/Documents/tf2/tf/
+  models/player/<cls>_animations.mdl` for all 9 classes (44 MB). Recon
+  notes for the future animation pipeline are in STATUS "next": TF2 player
+  models are COMPOSITES — geometry in `<cls>.mdl`, sequences in
+  `<cls>_animations.mdl` merged at load via $includemodel; TF2 v48 header
+  offsets differ from the SDK layout (numlocalseq is NOT at 124; empirically
+  numseq=20/seqindex=1028384 worked at 204/208 for soldier.mdl); seqdesc
+  stride is 196 bytes per Crowbar v48 (34 ints + 15 floats), NOT the SDK's
+  212. Sequence labels live in the _animations.mdl (e.g. ReloadStand_PRIMARY,
+  layer_reload_standing_arms) — the base mdl only holds ~20 local seqs.
+- **Textures fix NOT yet visually confirmed by the user** (Firefox check of
+  http://192.168.101.10:5173/modelview.html?cls=medic&team=red pending).
+  The [dbg] console.log line in modelview.html is still committed in the
+  file — remove after user confirmation.
+- Packed the offline copy for transfer: /tmp/opencode/tf2_19.tar.zst (128 MB,
+  zstd -19) and tf2.tar.zst (150 MB, zstd -3).

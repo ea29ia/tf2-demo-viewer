@@ -49,9 +49,12 @@ EOF
 ## Gotchas (hard-won, verified)
 
 ### VTF
-- **Mip 0 (largest) is FIRST, right after the header** — NOT smallest-first.
-  A first implementation that skipped small mips produced a solid-brown image;
-  the fix (read from `header_size` directly) produced the correct texture.
+- **Mip chain is stored SMALLEST-FIRST; mip 0 (full res) is the LAST
+  `mip_size` bytes of the image data.** (An earlier note here claimed the
+  opposite — that claim was written while the decoder produced a scrambled
+  image and is wrong; see decisions.md 2026-10-22: mip0-downscale vs mip1
+  mean|diff| = 1.0 with last-largest, 41.4 with first-largest. vtf.py now
+  reads `start = header + total - mip_size`.)
 - Texture data offset = the `headerSize` field at offset 12 (104–112 typical);
   do not assume 80.
 - `width/height` at offset 16 (`<HH`), image format at offset 52 (`<I`),
