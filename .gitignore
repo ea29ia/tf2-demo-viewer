@@ -3,6 +3,7 @@ web/node_modules/
 web/dist/
 assets/*.bsp
 web/public/maps/*.glb
+web/public/maps/*_lm.png
 web/public/replay/*.bin
 *.log
 

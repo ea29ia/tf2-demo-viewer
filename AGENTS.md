@@ -70,7 +70,10 @@ python3 tools/validate_glb.py web/public/maps/pl_upward.glb
 ```
 (add_textures_glb.py needs the local TF2 install for VPK textures; it
 appends images to the GLB and neutralises vertex colors on textured
-materials — run it right after bsp2glb, BEFORE add_props_glb.py.)
+materials — run it right after bsp2glb, BEFORE add_props_glb.py.
+bsp2glb.py also writes the lightmap atlas sidecar
+web/public/maps/pl_upward_lm.png — it is gitignored with the GLB and must
+be regenerated together with it.)
 
 Replay from a demo:
 ```
