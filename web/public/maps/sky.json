@@ -1,0 +1,17 @@
+{
+ "sky": "sky_upward",
+ "size": 512,
+ "faces": {
+  "px": "sky_px.png",
+  "nx": "sky_nx.png",
+  "py": "sky_py.png",
+  "ny": "sky_ny.png",
+  "pz": "sky_pz.png",
+  "nz": "sky_nz.png"
+ },
+ "fog": [
+  159,
+  183,
+  194
+ ]
+}

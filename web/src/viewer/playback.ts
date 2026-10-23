@@ -44,6 +44,7 @@ import { applyProjectiles } from './projectiles';
 import { updateDamageFx } from './damageFx';
 import { collectPropEntries, buildPropBoxOverlay } from './inspect';
 import { loadPropModels } from './propModels';
+import { loadSky } from './sky';
 import {
   setPlaying,
   togglePlay,
@@ -413,6 +414,12 @@ function applySourceDetailModulate(material: THREE.MeshStandardMaterial): void {
 async function loadMap(): Promise<void> {
   const loader = new GLTFLoader();
   const gltf = await loader.loadAsync(MAP_URL);
+
+  // Skybox (cube-face PNGs from tools/export_sky.py). Cosmetic: a failure
+  // keeps the plain dark background and never blocks the map.
+  void loadSky(BASE + 'maps/').catch((err) => {
+    console.warn('[map] no skybox:', (err as Error).message);
+  });
 
   // Lightmap atlas sidecar (written by bsp2glb.py next to the GLB). Applied
   // as material.lightMap on the world mesh — glTF has no lightmap slot, so

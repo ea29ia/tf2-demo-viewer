@@ -15,6 +15,7 @@ viewer/
     validate.py      byte-level replay.bin validator (run after any change)
   tools/             python, stdlib-only converters
     bsp2glb.py       BSP v20 -> GLB (brushes, displacements, vertex colors)
+    export_sky.py    worldspawn skyname -> 6 cube-face PNGs + sky.json (fog tint)
     probe_props.py   static-prop lump parser (finds entry stride etc.)
     add_props_glb.py oriented prop boxes + foliage split + extras metadata
     add_kits_glb.py  health/ammo kit pads + kit extras
@@ -78,6 +79,7 @@ python3 tools/add_textures_glb.py assets/pl_upward.bsp web/public/maps/pl_upward
 python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb web/public/models/props/manifest.json
 python3 tools/add_kits_glb.py web/public/maps/pl_upward.glb web/public/maps/kits.json
 python3 tools/validate_glb.py web/public/maps/pl_upward.glb
+python3 tools/export_sky.py assets/pl_upward.bsp web/public/maps
 ```
 (add_textures_glb.py needs the local TF2 install for VPK textures; it
 appends images to the GLB and neutralises vertex colors on textured

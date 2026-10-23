@@ -4,6 +4,7 @@ web/dist/
 assets/*.bsp
 web/public/maps/*.glb
 web/public/maps/*_lm.png
+web/public/maps/sky_*.png
 web/public/replay/*.bin
 *.log
 

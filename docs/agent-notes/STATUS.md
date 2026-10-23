@@ -560,3 +560,32 @@ is a dev-server helper:
 
 Scope note: production build serves static files only — the endpoint is not
 shipped; the WASM in-browser parser (TODO.txt) is the real fix later.
+
+## Session update — 2026-10-23 (night 2): SKYBOX shipped
+
+worldspawn `skyname` = sky_upward. New `tools/export_sky.py`: resolves the
+six sky VMTs (materials/skybox/sky_upward{ft,bk,lf,rt,up,dn}.vmt in tf2_misc)
+to their LDR $basetexture VTFs (BGR888, decode fine with vtf.py), resamples
+each face to square 512x512 bilinear, writes web/public/maps/sky_{px,nx,py,
+ny,pz,nz}.png + sky.json manifest. Face mapping (Source yaw0=+X): ft=+X,
+bk=-X, rt=-Y, lf=+Y, up=+Z, dn=-Z; viewer px<-ft, nx<-bk, py<-up, ny<-dn,
+pz<-rt, nz<-lf. sky.json also carries a "fog" tint (mean of the bottom band
+of the side faces, [159,183,194] for upward) — viewer re-tints scene.fog so
+distant geometry fades into the horizon haze instead of dark navy.
+
+Sky facts measured: side texture is zenith->nadir with the horizon at the
+vertical centre (top half dark blue 94,128,155; bottom half light haze
+142,168,184); up face radially uniform; the Source sky shader's exact
+side-face UV convention (VMT $basetexturetransform scale 1 2) was NOT
+reproduced — the 1:1 face mapping puts the horizon at face middle, which is
+correct-looking, and pl_upward's sky is radially symmetric so in-face
+rotation is invisible. If a future map has a directional sky, per-face
+rotation may be needed (checked TL==TR / BL==BR in the tool output means).
+
+Viewer: web/src/viewer/sky.ts — CubeTextureLoader (order px,nx,py,ny,pz,nz),
+SRGBColorSpace, scene.background = cube; fog color from sky.json; failures
+are console.warn only (cosmetic). Wired fire-and-forget in loadMap().
+Assets gitignored (sky_*.png, Valve-derived); sky.json committed.
+Verified: tsc --noEmit + npm run build exit 0; dev server serves
+/maps/sky.json and /maps/sky_px.png 200. USER eyeball pending (sky visible,
+fog blend at horizon).
