@@ -653,3 +653,22 @@ User: "gates are solid objects, not a grate; no cart; lockers face the wall".
   replay.bin v4 (PLAN.md contract update + dumper + reader). That is the
   next big work item, not a rendering bug.
 Verified: validate_glb.py PASS, tsc + build exit 0.
+
+## Session update — 2026-10-23 (night 6): gates restored, wall-snapped lockers
+
+User: gates vanished entirely, no cart even at t=0, lockers wrong vs walls.
+- **Gates RESTORED**: dropping the func_door brushes was wrong — those
+  brushes ARE the visible door panels (METALDOOR01_192 solid door with grate
+  window at redC1/C3/C4, IBEAM001B beam doors for the rest). Restored the
+  brush-model pass WITH the per-entity origin translation (from ede0526).
+- **Lockers wall-snapped**: replaced the blind 180-flip with a real
+  raycast: 16 horizontal rays against worldspawn vertical faces (floor/
+  ceiling excluded, 96u radius); the prop faces AWAY from the nearest wall.
+  Applied ONLY to the resupply batch (signs/billboards keep authored angles
+  — they are wall-mounted and correct). Resulting yaws printed by the tool.
+- **Cart**: static cart parts ARE at BLU spawn (x -2712..-2748, y -1476..-1670)
+  near track start — confirmed present in extras with real mesh ids. If the
+  user still sees none, next suspect is prop GLB load failures in the
+  browser console. Moving cart = replay v4 (path_track motion), the known
+  TODO.
+Verified: validate_glb.py PASS, tsc + build exit 0. USER eyeball pending.
