@@ -594,6 +594,15 @@ def main(argv) -> int:
             tint_lums.append(luminance(tint))
         # COLOR_0 = palette colour * baked tint, both display-referred sRGB.
         lit_color = (color[0] * tint[0], color[1] * tint[1], color[2] * tint[2])
+        # Raw baked tint for the real prop meshes (display-referred sRGB). The
+        # viewer instantiates the exported model with an unlit material and
+        # multiplies it by this per-instance colour, matching the world
+        # lightmap. Clamp/round so the extras stay finite and compact.
+        tint_rgb = [
+            round(min(1.0, max(0.0, float(v))), 3)
+            if math.isfinite(v) else 1.0
+            for v in tint
+        ]
 
         # Compact entry for the web click-to-inspect lookup and for instancing
         # the real prop mesh. Name keeps the legacy short form; m is the full
@@ -613,6 +622,9 @@ def main(argv) -> int:
             "a": [pitch, yaw, roll],
             "k": uniform_scale,
             "m": model_id,
+            # Baked tint (nearest lightmapped face average light); used by the
+            # viewer for the real prop mesh instance colour.
+            "c": tint_rgb,
         }
         # Foliage flag: lets the viewer route the real mesh into its hideable
         # foliage group. Omitted (not written as false) when not foliage.

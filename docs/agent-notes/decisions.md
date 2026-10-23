@@ -200,3 +200,15 @@ the viewer loads every model at startup. Re-exporting the existing batches at
 512 is intentional (uniform budget); scout player GLBs remain byte-identical.
 Foliage detection stays in add_props_glb (`is_foliage`) and is published to
 the viewer as extras `"f": true`, avoiding a duplicated keyword list in TS.
+
+## 2026-10-23: props rendered unlit with the baked tint, not scene lights
+The world is MeshBasic + baked lightmap (no lights), but the exported prop
+models kept MeshStandardMaterial under a blue HemisphereLight(0x9fc5ff) and
+blue fill, so every model had a blue cast (textures verified neutral). Props
+now become unlit MeshBasic and receive the per-prop baked avg-light tint via
+extras `"c"` + InstancedMesh.instanceColor, converted sRGB -> linear to match
+the sRGB lightmap. three r186 does not apply instanceColor unless USE_COLOR is
+defined, so a guarded `diffuseColor.rgb *= vColor.rgb` injection is added.
+BLEND props (light cones) keep a white tint. Rejected: neutralizing the global
+hemisphere light (would change players/kits) and keeping the sun on props
+(inconsistent with the baked world, and the source of the complaint).

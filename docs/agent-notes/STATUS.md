@@ -19,6 +19,16 @@ https://github.com/ea29ia/tf2-demo-viewer (public).
 
 ## Working (verified 2026-10-21 with the exact commands below)
 
+- **Prop meshes use baked light (2026-10-23)**: the instanced prop models were
+  lit by the scene's blue hemisphere/fill while the world is baked unlit, so
+  props looked blue. `add_props_glb.py` now stores the baked nearest-face tint
+  in extras `"c"`; `propModels.ts` builds unlit MeshBasic materials and applies
+  the tint per instance through `instanceColor` (sRGB -> linear; a
+  `color_fragment` injection covers three versions where USE_INSTANCING_COLOR
+  alone does not tint). BLEND props (light cones) stay untinted. Verified:
+  full GLB chain + `validate_glb.py` PASS (44830 tris), 1182/1182 entries have
+  `c`, `tsc --noEmit`/`npm run build` exit 0. Colour still needs a HUMAN look.
+
 - **All static props are real meshes (2026-10-23)**: 225 of 234 placed models
   exported (9 skybox models intentionally excluded), 0 failures, manifest 225
   entries. Embedded prop textures are capped at 512 px (`--tex-size`, bilinear,
