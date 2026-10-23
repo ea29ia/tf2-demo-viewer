@@ -137,6 +137,37 @@ def main(argv) -> int:
     gltf, bin_blob, size = load_glb(path)
 
     materials = gltf.get("materials", [])
+    textures = gltf.get("textures", [])
+    images = gltf.get("images", [])
+
+    # Texture wiring: any material texture reference must resolve through the
+    # textures/images tables (a dangling baseColorTexture crashes
+    # GLTFLoader with "json.textures is undefined" at load time). A missing
+    # reference (None) is normal — untextured materials are legal.
+    def check_texture_ref(ref, where):
+        if ref is None:
+            return
+        if not isinstance(ref, dict) or "index" not in ref:
+            errors.append(f"{where}: malformed texture reference {ref!r}")
+            return
+        ti = ref["index"]
+        if not isinstance(ti, int) or not (0 <= ti < len(textures)):
+            errors.append(f"{where}: texture index {ti!r} out of range "
+                          f"(textures: {len(textures)})")
+            return
+        source = textures[ti].get("source")
+        if not isinstance(source, int) or not (0 <= source < len(images)):
+            errors.append(f"{where}: texture {ti} source {source!r} out of range "
+                          f"(images: {len(images)})")
+
+    for mi, mat in enumerate(materials):
+        where = f"material[{mi}] ({mat.get('name', '?')})"
+        pbr = mat.get("pbrMetallicRoughness", {})
+        check_texture_ref(pbr.get("baseColorTexture"), where + " baseColorTexture")
+        check_texture_ref(pbr.get("metallicRoughnessTexture"),
+                          where + " metallicRoughnessTexture")
+        check_texture_ref(mat.get("normalTexture"), where + " normalTexture")
+        check_texture_ref(mat.get("emissiveTexture"), where + " emissiveTexture")
     meshes = gltf.get("meshes", [])
     errors = structure_errors(gltf, bin_blob)
 

@@ -88,3 +88,24 @@ export/render pipeline, read this first.
 ## Open questions
 - None for this file; add new traps here as they are discovered (one bullet,
   with the cost it incurred).
+
+## Traps added 2026-10-23 (map-texture embedding round)
+
+1. **Built artifact ≠ intended artifact.** add_textures_glb.py filled a LOCAL
+   `textures` list and never assigned it into the glTF JSON; the GLB shipped
+   with 71 materials referencing textures and NO `textures` array. Verify the
+   WRITTEN file (re-parse the GLB and count keys), not your in-memory state.
+   Cost: a whole browser-debug round (user-reported Firefox crash).
+2. **bufferView cursor must advance by the ALIGNED length.** Appending
+   `png + pad` but advancing `cursor += len(png)` shifts every subsequent
+   image; symptom: image[0] fine, image[1..n] garbage ("Couldn't load texture
+   blob" for ~50 of 70). Padding is part of the chunk stream.
+3. **Material-level extension requires `extensionsUsed` at asset level.** With
+   `KHR_materials_unlit` in a material's extensions but not declared in
+   `extensionsUsed`, GLTFLoader crashes with "reading 'getMaterialType'"
+   (kmuExtension is undefined — the handler is installed from extensionsUsed).
+4. **A "no console errors" headless check is not a PASS.** GLTFLoader failures
+   surface in the app's error overlay, not pageerror (the app catches them).
+   Assert: overlay hidden AND the `[inspect] prop entries loaded` line present
+   AND the screenshot eyeballed. The false-positive textured screenshot came
+   from checking only the console filter.

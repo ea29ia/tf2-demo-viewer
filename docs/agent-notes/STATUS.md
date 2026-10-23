@@ -353,3 +353,19 @@ and "all 234 prop models, gradually".
 - **Next**: lightmap atlas (phase 3), prop InstancedMesh (phase 4,
   props2glb.py ready), WorldVertexTransition blending (phase 5), skybox
   (phase 6). Runtime ~105 s for add_textures (70 PNG encodes, zlib -9).
+
+## Session update — 2026-10-23 (night): map texture embedding FIXED end-to-end
+Three bugs in add_textures_glb.py, all caught by browser verification after a
+user-reported Firefox error ("json.textures is undefined"):
+1. local `textures` list never assigned into gltf JSON (materials referenced
+   textures with no textures array) — fixed;
+2. bufferView cursor advanced by unpadded PNG length -> shifted image blobs
+   (~50/70 "Couldn't load texture") — fixed (advance by aligned length);
+3. KHR_materials_unlit not declared in extensionsUsed -> GLTFLoader crash
+   "reading 'getMaterialType'" — fixed (declared in extensionsUsed).
+validate_glb.py now verifies material texture wiring (baseColorTexture/
+metallicRoughness/normal/emissive indices resolve through textures->images;
+None = legal absence). All 70 embedded PNGs re-verified by byte-level parse
+(sig + IHDR + IDAT inflate + raw size). Final: 16.23 MiB GLB, PASS,
+chromium renders textured map, overlay hidden, [inspect] 1212, no errors.
+USER Firefox eyeball pending (hard reload; signs RED/BLU orientation, seams).

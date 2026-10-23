@@ -215,14 +215,17 @@ def main(argv) -> int:
             png_cache[key] = None
             return None
         png = vtf.write_png_bytes(w, h, rgba)
+        padded_png = png + b"\0" * ((4 - len(png) % 4) % 4)
         view_index = len(gltf.get("bufferViews", []))
         gltf.setdefault("bufferViews", []).append({
             "buffer": 0,
             "byteOffset": cursor,
             "byteLength": len(png),
         })
-        cursor += len(png)
-        bin_parts.append(png + b"\0" * ((4 - len(png) % 4) % 4))
+        # cursor must advance by the ALIGNED length (the next bufferView
+        # points past the padding that follows this PNG in the BIN chunk).
+        cursor += len(padded_png)
+        bin_parts.append(padded_png)
         image_index = len(gltf.get("images", []))
         gltf.setdefault("images", []).append({"bufferView": view_index,
                                               "mimeType": "image/png"})
@@ -286,10 +289,18 @@ def main(argv) -> int:
         if shader == "unlitgeneric":
             ext = mat.setdefault("extensions", {})
             ext["KHR_materials_unlit"] = {}
+            # GLTFLoader only installs an extension handler when the asset
+            # DECLARES the extension in extensionsUsed; a material-level
+            # extension without it crashes the loader (kmuExtension undefined).
+            used = gltf.setdefault("extensionsUsed", [])
+            if "KHR_materials_unlit" not in used:
+                used.append("KHR_materials_unlit")
         textured += 1
 
     bin_blob = bytes(mutable_bin) + b"".join(bin_parts)
     gltf["buffers"][0]["byteLength"] = len(bin_blob)
+    if textures:
+        gltf["textures"] = textures
     write_glb(glb_path, gltf, bin_blob)
 
     print(f"textures embedded: {textured} materials "
