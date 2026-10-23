@@ -689,3 +689,17 @@ User feedback round: red lockers correct with authored angles, blue need
   them); the user's "no cart" report needs a browser-side check of
   [props] warnings after a hard reload. Moving cart = replay v4 TODO.
 Verified: validate_glb.py PASS (44986 tris), tsc + build exit 0.
+
+## Session update — 2026-10-24 (2): STALE BROWSER CACHE was the whole round
+
+The user's three reports (solid gates, no cart, wrong lockers) all came from
+a STALE pl_upward.glb in Firefox's disk cache: the console consistently
+showed "prop entries loaded: 1212" while the served file had 1240 + the
+brushmodels mesh. B1/C1 builds never reached the browser. Fix:
+vite.config.ts now serves /maps/, /models/, /replay/ with cache-control:
+no-store in dev AND preview (74a91b6); server restarted. The current served
+GLB verified: meshes [pl_upward, kits, brushmodels], 1240 props, locker
+yaws [180, 90, 270, 270, 270, 180].
+Also: Firefox blocked a file:/// reference (user tried attaching a local
+file path somewhere) — parked in TODO; AGENTS/STATUS updated.
+USER: plain reload should now be enough.
