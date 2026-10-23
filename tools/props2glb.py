@@ -7,6 +7,7 @@ Two subcommands:
     python3 tools/props2glb.py <map.bsp> export --tf <tf_dir> --out <dir>
                                      [--top 5] [--model models/props_2fort/oildrum]
                                      [--match REGEX[,REGEX...]]
+                                     [--exclude REGEX[,REGEX...]]
 
 `list` parses the sprp game lump through tools/probe_props.py (the same path
 tools/add_props_glb.py uses), counts prop instances per model and prints the
@@ -19,10 +20,20 @@ matched set by instance count) and `--model` (filter the explicit list). When
 `--match` is given without `--top` and `--model`, every matching model of the
 map is selected.
 
+`--exclude` removes models from the matched set. It takes the same
+repeatable/comma-separated, case-insensitive regular expressions and is applied
+after `--match` (e.g. `--exclude skybox`). Anchor a pattern with a leading
+slash to match the basename only: `--match '/(train|wood_)'` does not match
+`models/props_trainyard/handrail28`, because the slash must directly precede
+the matched prefix.
+
 `export` runs the mdl2glb.py geometry pipeline (MDL v48 + VVD + dx90 VTX) in
 prop mode: skin family 0 only, one GLB per model, no red/blue team split,
 textures embedded as PNG. The GLB keeps the mdl2glb axis mapping
-(x, y, z) -> (z, y, -x), i.e. glTF Y-up, model forward = local +x.
+(x, y, z) -> (z, y, -x), i.e. glTF Y-up, model forward = local +x. Prop mode
+also keeps the VTF alpha channel and emits glTF `alphaMode` (`BLEND`, `MASK`
+with `alphaCutoff`, or `OPAQUE`) from the VMT alpha flags, so VMT-driven
+transparency (translucent glass, fence cutouts) is preserved.
 
 `export` also merges `<out>/manifest.json`:
     {"version": 1, "models": {"<model id>": {"file": "<basename>.glb", "tris": N}}}
@@ -152,7 +163,12 @@ class PropTextures(mdl2glb.Textures):
                           re.IGNORECASE)
         if not match:
             return None
-        return match.group(1).replace("\\", "/")
+        value = match.group(1).replace("\\", "/")
+        # Some prop VMTs spell the value with the `.vtf` extension
+        # (props_coalmine/chicken_wire.vmt); the VPK lookup wants it without.
+        if value.lower().endswith(".vtf"):
+            value = value[:-4]
+        return value
 
     def _ensure_index(self) -> None:
         if self._vmt_index is not None:
@@ -335,7 +351,8 @@ def export_model(tf_dir: str, model: str, out_path: str,
         # Prop mode: skin family 0; identity when the model has no skin table.
         skin = mdl.skins[0] if mdl.skins else []
         gltf, blob = mdl2glb.build_glb(
-            mdl, vvd, vtx_lod, textures, skin, model, model_dir=model)
+            mdl, vvd, vtx_lod, textures, skin, model, model_dir=model,
+            keep_alpha=True)
         mdl2glb.write_glb(out_path, gltf, blob)
 
         accessors = gltf["accessors"]
@@ -488,7 +505,8 @@ def matches_any(patterns: list[re.Pattern], model: str) -> bool:
 
 def select_targets(names: list[str], counts: collections.Counter, top: int | None,
                    explicit: list[str],
-                   patterns: list[re.Pattern]) -> list[str]:
+                   patterns: list[re.Pattern],
+                   excludes: list[re.Pattern] | None = None) -> list[str]:
     """Pick the models to export.
 
     * `--model` wins as the candidate list (then `--match` filters it).
@@ -496,6 +514,7 @@ def select_targets(names: list[str], counts: collections.Counter, top: int | Non
       `--match` is given, so models are matched by id, not by rank;
     * otherwise the `top` most frequent placed models are used.
     A `--top` combined with `--match` keeps the N most frequent matches.
+    `--exclude` is applied last, after `--match` has selected the candidates.
     """
     if explicit:
         targets = [model_id(m) for m in explicit]
@@ -509,6 +528,9 @@ def select_targets(names: list[str], counts: collections.Counter, top: int | Non
 
     if patterns:
         targets = [t for t in targets if matches_any(patterns, t)]
+
+    if excludes:
+        targets = [t for t in targets if not matches_any(excludes, t)]
 
     if patterns and top is not None and not explicit:
         # Instance count first, id as the deterministic tie-breaker.
@@ -532,13 +554,15 @@ def cmd_list(bsp_path: str, top: int) -> int:
 
 
 def cmd_export(bsp_path: str, tf_dir: str, out_dir: str, top: int | None,
-               explicit: list[str], patterns: list[str]) -> int:
+               explicit: list[str], patterns: list[str],
+               exclude_patterns: list[str]) -> int:
     names, counts, prop_count = enumerate_props(bsp_path)
     print(f"BSP: {bsp_path}")
     print(f"prop instances: {prop_count}, placed models: {len(counts)}")
 
     compiled = compile_matches(patterns)
-    targets = select_targets(names, counts, top, explicit, compiled)
+    excludes = compile_matches(exclude_patterns)
+    targets = select_targets(names, counts, top, explicit, compiled, excludes)
 
     print(f"exporting {len(targets)} model(s) to {out_dir}")
     misc = mdl2glb.vpk.open_pack(tf_dir, "tf2_misc")
@@ -574,7 +598,8 @@ def cmd_export(bsp_path: str, tf_dir: str, out_dir: str, top: int | None,
 USAGE = """usage:
   props2glb.py <map.bsp> list [--top N]
   props2glb.py <map.bsp> export --tf <tf_dir> --out <dir>
-                               [--top N] [--model M ...] [--match REGEX[,REGEX...]]"""
+                               [--top N] [--model M ...] [--match REGEX[,REGEX...]]
+                               [--exclude REGEX[,REGEX...]]"""
 
 
 def main(argv: list[str]) -> int:
@@ -589,6 +614,7 @@ def main(argv: list[str]) -> int:
     out_dir = None
     explicit: list[str] = []
     match_values: list[str] = []
+    exclude_values: list[str] = []
     i = 0
     while i < len(rest):
         arg = rest[i]
@@ -610,6 +636,10 @@ def main(argv: list[str]) -> int:
             match_values.extend(
                 part for part in rest[i + 1].split(",") if part.strip())
             i += 2
+        elif arg == "--exclude" and i + 1 < len(rest):
+            exclude_values.extend(
+                part for part in rest[i + 1].split(",") if part.strip())
+            i += 2
         else:
             print(f"unknown argument {arg!r}\n{USAGE}", file=sys.stderr)
             return 2
@@ -627,8 +657,16 @@ def main(argv: list[str]) -> int:
             except re.error as exc:
                 print(f"bad --match regex: {exc}\n{USAGE}", file=sys.stderr)
                 return 2
+        if exclude_values:
+            try:
+                re.compile("|".join(f"(?:{p})" for p in exclude_values),
+                           re.IGNORECASE)
+            except re.error as exc:
+                print(f"bad --exclude regex: {exc}\n{USAGE}", file=sys.stderr)
+                return 2
         return cmd_export(bsp_path, tf_dir, out_dir,
-                          top if top_given else None, explicit, match_values)
+                          top if top_given else None, explicit, match_values,
+                          exclude_values)
     print(f"unknown command {command!r}\n{USAGE}", file=sys.stderr)
     return 2
 

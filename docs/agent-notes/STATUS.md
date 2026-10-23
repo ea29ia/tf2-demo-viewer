@@ -19,6 +19,18 @@ https://github.com/ea29ia/tf2-demo-viewer (public).
 
 ## Working (verified 2026-10-21 with the exact commands below)
 
+- **Prop mesh batch 2 — track/wood/window/train/scaffolding (2026-10-23)**:
+  `props2glb.py` gained `--exclude`; 45 more models exported (16.8 MiB,
+  0 failures, manifest = 66 entries / 36.9 MiB). Prop exports now carry
+  Source alpha: `mdl2glb.py` keeps PNG alpha and sets `alphaMode` from the
+  VMT in prop mode only (chicken_wire -> MASK 0.25; the window VMTs are
+  genuinely OPAQUE in Source: `$basemapalphaphongmask`, no translucency).
+  Player exports stay byte-identical (scout red/blue hashes match).
+  `add_props_glb.py --manifest` now omits **462** boxes (140 boulders + 322
+  of this batch). Verified: full GLB chain + `validate_glb.py` PASS
+  (53470 tris, props mesh 8016 tris, 21.5 MiB), `tsc --noEmit` and
+  `npm run build` exit 0. HUMAN visual check still required.
+
 - **Real boulder meshes (2026-10-23)**: 21 `boulder_*` models exported by
   `tools/props2glb.py --match boulder` into `web/public/models/props/` (21 MiB,
   textures embedded) with `manifest.json`. `tools/add_props_glb.py` now stores

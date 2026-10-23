@@ -32,6 +32,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import vpk  # noqa: E402
 import vtf  # noqa: E402
+import vmt  # noqa: E402
 
 VSIZE = 48  # sizeof(mstudiovertex_t): weights 16 + pos 12 + normal 12 + uv 8
 MAX_NUM_LODS = 8
@@ -355,7 +356,37 @@ class Textures:
             # EyeRefract eyeballs have no $basetexture; the iris is close
             # enough for a low-detail viewer.
             match = re.search(r"\$Iris\"?\s*\"?([^\"\s]+)", text)
-        return match.group(1) if match else None
+        if not match:
+            return None
+        # A few VMTs (mostly prop materials) spell the value with a backslash
+        # separator or a `.vtf` extension; normalise to the VPK lookup form.
+        value = match.group(1).replace("\\", "/")
+        if value.lower().endswith(".vtf"):
+            value = value[:-4]
+        return value
+
+    def alpha_mode(self, material_path: str | None) -> tuple[str, float | None]:
+        """Return `(alphaMode, alphaCutoff)` for a material's VMT.
+
+        `$translucent`, `$alpha` and `$decal` map to glTF BLEND, `$alphatest`
+        to MASK with the VMT's `$alphatestreference` as cutoff. Unknown or
+        unreadable VMTs stay OPAQUE, matching the historical behaviour.
+        """
+        if not material_path:
+            return ("OPAQUE", None)
+        try:
+            text = self.misc.read(material_path).decode("latin-1")
+            try:
+                mat = vmt.resolve(text, self.misc)
+            except vmt.VmtError:
+                mat = vmt.parse(text)
+        except Exception:
+            return ("OPAQUE", None)
+        if vmt.is_translucent(mat) or vmt.is_decal(mat):
+            return ("BLEND", None)
+        if vmt.is_alpha_tested(mat):
+            return ("MASK", vmt.alpha_test_reference(mat))
+        return ("OPAQUE", None)
 
     def load(self, texture_name: str) -> tuple[int, int, bytes] | None:
         if texture_name in self.cache:
@@ -414,13 +445,19 @@ def write_glb(path: str, gltf: dict, bin_blob: bytes) -> None:
 
 def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
               skin: list[int], name: str,
-              model_dir: str | None = None) -> tuple[dict, bytes]:
+              model_dir: str | None = None,
+              keep_alpha: bool = False) -> tuple[dict, bytes]:
     """Build one GLB. Returns (gltf_json, binary).
 
     Source model space (from the VVD) is right-handed with up = +y, forward
     = +z, left = +x. glTF is Y-up and the viewer expects the model to face
     its local +x (rotation.y = player yaw), so the mapping is
     (x, y, z) -> (z, y, -x)  (forward -> +x, left -> -z).
+
+    `keep_alpha` is the prop-model mode: when set, the VMT alpha flags decide
+    the glTF alphaMode, and only translucent/alpha-tested materials keep the
+    VTF alpha channel in the PNG. The player path (default) flattens alpha to
+    opaque RGB because there it is a specular mask, not opacity.
     """
     positions: list[float] = []
     normals: list[float] = []
@@ -443,15 +480,18 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
         tex_name = mdl.texture_names[tex_index]
         # Bare texture names (no path) are relative to the model's own
         # material directory; derive that from a fully qualified sibling.
-        vmt = textures.resolve_material(tex_name, model_dir)
-        base = textures.vmt_basetexture(vmt) if vmt else None
+        vmt_path = textures.resolve_material(tex_name, model_dir)
+        base = textures.vmt_basetexture(vmt_path) if vmt_path else None
         if base is None:
             base = tex_name
         img = textures.load(base)
         if img is None:
             return None
         w, h, rgba = img
-        png = png_bytes(w, h, rgba)
+        mode, cutoff = ("OPAQUE", None)
+        if keep_alpha:
+            mode, cutoff = textures.alpha_mode(vmt_path)
+        png = png_bytes(w, h, rgba, keep_alpha=keep_alpha and mode != "OPAQUE")
         bin_chunks.append(png)
         images.append({
             "bufferView": len(bin_chunks) - 1,
@@ -460,7 +500,7 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
         })
         textures_gltf.append({"source": len(images) - 1})
         used_materials[ref] = len(materials)
-        materials.append({
+        material = {
             "name": base.split("/")[-1],
             "pbrMetallicRoughness": {
                 "baseColorTexture": {"index": len(textures_gltf) - 1},
@@ -468,7 +508,11 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
                 "roughnessFactor": 0.9,
             },
             "doubleSided": True,
-        })
+            "alphaMode": mode,
+        }
+        if mode == "MASK" and cutoff is not None:
+            material["alphaCutoff"] = cutoff
+        materials.append(material)
         return used_materials[ref]
 
     primitives: list[dict] = []
@@ -633,7 +677,7 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
         "scenes": [{"nodes": [0]}],
         "nodes": [{"mesh": 0, "name": name}],
         "meshes": [{"name": name, "primitives": primitives}],
-        "materials": [dict(m, alphaMode="OPAQUE") for m in materials],
+        "materials": [dict(m) for m in materials],
         "textures": textures_gltf,
         "images": images,
         "samplers": [{"magFilter": 9729, "minFilter": 9987,
@@ -652,25 +696,38 @@ def build_glb(mdl: Mdl, vvd: Vvd, vtx_lod: list, textures: Textures,
 import zlib  # noqa: E402
 
 
-def png_bytes(width: int, height: int, rgba: bytes) -> bytes:
+def png_bytes(width: int, height: int, rgba: bytes,
+              keep_alpha: bool = False) -> bytes:
     def chunk(kind: bytes, payload: bytes) -> bytes:
         body = kind + payload
         return struct.pack(">I", len(payload)) + body + struct.pack(
             ">I", zlib.crc32(body) & 0xFFFFFFFF)
 
-    # The VTF alpha channel on player textures holds a specular mask, not
-    # opacity — flatten to opaque RGB (color type 2), keep 4-byte input layout.
-    stride_in = width * 4
-    stride_out = width * 3
-    raw = bytearray()
-    for y in range(height):
-        row = rgba[y * stride_in:(y + 1) * stride_in]
-        row = bytearray(row)
-        del row[3::4]  # strip alpha channel
-        raw.append(0)
-        raw += row
+    if keep_alpha:
+        # Prop materials: the VTF alpha channel is real opacity, so emit RGBA
+        # (color type 6) and let the material's alphaMode use it.
+        color_type = 6
+        stride = width * 4
+        raw = bytearray()
+        for y in range(height):
+            raw.append(0)
+            raw += rgba[y * stride:(y + 1) * stride]
+    else:
+        # The VTF alpha channel on player textures holds a specular mask, not
+        # opacity — flatten to opaque RGB (color type 2), keep 4-byte input
+        # layout.
+        color_type = 2
+        stride_in = width * 4
+        raw = bytearray()
+        for y in range(height):
+            row = rgba[y * stride_in:(y + 1) * stride_in]
+            row = bytearray(row)
+            del row[3::4]  # strip alpha channel
+            raw.append(0)
+            raw += row
     out = b"\x89PNG\r\n\x1a\n"
-    out += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    out += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, color_type,
+                                      0, 0, 0))
     out += chunk(b"IDAT", zlib.compress(bytes(raw), 6))
     out += chunk(b"IEND", b"")
     return out

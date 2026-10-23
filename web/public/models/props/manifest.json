@@ -1,5 +1,29 @@
 {
   "models": {
+    "models/custom/train_bumper": {
+      "file": "custom_train_bumper.glb",
+      "tris": 4466
+    },
+    "models/props_2fort/trainwheel001": {
+      "file": "props_2fort_trainwheel001.glb",
+      "tris": 352
+    },
+    "models/props_2fort/trainwheel002": {
+      "file": "props_2fort_trainwheel002.glb",
+      "tris": 1760
+    },
+    "models/props_2fort/trainwheel003": {
+      "file": "props_2fort_trainwheel003.glb",
+      "tris": 2816
+    },
+    "models/props_2fort/window004d": {
+      "file": "props_2fort_window004d.glb",
+      "tris": 128
+    },
+    "models/props_2fort/window004d_cluster01": {
+      "file": "props_2fort_window004d_cluster01.glb",
+      "tris": 512
+    },
     "models/props_coalmines/boulder1": {
       "file": "props_coalmines_boulder1.glb",
       "tris": 544
@@ -83,6 +107,162 @@
     "models/props_coalmines/boulder_pile2": {
       "file": "props_coalmines_boulder_pile2.glb",
       "tris": 1112
+    },
+    "models/props_coalmines/scaffolding1": {
+      "file": "props_coalmines_scaffolding1.glb",
+      "tris": 1072
+    },
+    "models/props_coalmines/window2": {
+      "file": "props_coalmines_window2.glb",
+      "tris": 138
+    },
+    "models/props_coalmines/window3": {
+      "file": "props_coalmines_window3.glb",
+      "tris": 106
+    },
+    "models/props_coalmines/window5": {
+      "file": "props_coalmines_window5.glb",
+      "tris": 66
+    },
+    "models/props_coalmines/window6": {
+      "file": "props_coalmines_window6.glb",
+      "tris": 132
+    },
+    "models/props_coalmines/window7": {
+      "file": "props_coalmines_window7.glb",
+      "tris": 88
+    },
+    "models/props_coalmines/wood_debris1": {
+      "file": "props_coalmines_wood_debris1.glb",
+      "tris": 180
+    },
+    "models/props_coalmines/wood_debris2": {
+      "file": "props_coalmines_wood_debris2.glb",
+      "tris": 158
+    },
+    "models/props_coalmines/wood_debris3": {
+      "file": "props_coalmines_wood_debris3.glb",
+      "tris": 284
+    },
+    "models/props_coalmines/wood_debris4": {
+      "file": "props_coalmines_wood_debris4.glb",
+      "tris": 152
+    },
+    "models/props_coalmines/wood_debris5": {
+      "file": "props_coalmines_wood_debris5.glb",
+      "tris": 200
+    },
+    "models/props_coalmines/wood_fence_128": {
+      "file": "props_coalmines_wood_fence_128.glb",
+      "tris": 1036
+    },
+    "models/props_coalmines/wood_fence_256": {
+      "file": "props_coalmines_wood_fence_256.glb",
+      "tris": 2142
+    },
+    "models/props_coalmines/wood_fence_64": {
+      "file": "props_coalmines_wood_fence_64.glb",
+      "tris": 910
+    },
+    "models/props_coalmines/wood_fence_short_128": {
+      "file": "props_coalmines_wood_fence_short_128.glb",
+      "tris": 744
+    },
+    "models/props_coalmines/wood_fence_short_256": {
+      "file": "props_coalmines_wood_fence_short_256.glb",
+      "tris": 1500
+    },
+    "models/props_coalmines/wood_support_128": {
+      "file": "props_coalmines_wood_support_128.glb",
+      "tris": 370
+    },
+    "models/props_coalmines/wood_support_256": {
+      "file": "props_coalmines_wood_support_256.glb",
+      "tris": 654
+    },
+    "models/props_farm/wood_pile": {
+      "file": "props_farm_wood_pile.glb",
+      "tris": 324
+    },
+    "models/props_forest/wood_patch1": {
+      "file": "props_forest_wood_patch1.glb",
+      "tris": 206
+    },
+    "models/props_forest/wood_patch1_small": {
+      "file": "props_forest_wood_patch1_small.glb",
+      "tris": 154
+    },
+    "models/props_forest/wood_patch2": {
+      "file": "props_forest_wood_patch2.glb",
+      "tris": 138
+    },
+    "models/props_forest/wood_patch2_small": {
+      "file": "props_forest_wood_patch2_small.glb",
+      "tris": 110
+    },
+    "models/props_forest/wood_patch4_small": {
+      "file": "props_forest_wood_patch4_small.glb",
+      "tris": 198
+    },
+    "models/props_forest/wood_stairs128": {
+      "file": "props_forest_wood_stairs128.glb",
+      "tris": 472
+    },
+    "models/props_forest/wood_stairs48": {
+      "file": "props_forest_wood_stairs48.glb",
+      "tris": 124
+    },
+    "models/props_forest/wood_stairs96": {
+      "file": "props_forest_wood_stairs96.glb",
+      "tris": 290
+    },
+    "models/props_mining/track_arc_90degree_128": {
+      "file": "props_mining_track_arc_90degree_128.glb",
+      "tris": 1337
+    },
+    "models/props_mining/track_arc_90degree_256": {
+      "file": "props_mining_track_arc_90degree_256.glb",
+      "tris": 2875
+    },
+    "models/props_mining/track_s_curve_48": {
+      "file": "props_mining_track_s_curve_48.glb",
+      "tris": 1825
+    },
+    "models/props_mining/track_s_curve_48_mirrored": {
+      "file": "props_mining_track_s_curve_48_mirrored.glb",
+      "tris": 1825
+    },
+    "models/props_mining/track_s_curve_96": {
+      "file": "props_mining_track_s_curve_96.glb",
+      "tris": 2305
+    },
+    "models/props_mining/track_s_curve_96_mirrored": {
+      "file": "props_mining_track_s_curve_96_mirrored.glb",
+      "tris": 2305
+    },
+    "models/props_mining/track_straight_128": {
+      "file": "props_mining_track_straight_128.glb",
+      "tris": 787
+    },
+    "models/props_mining/track_straight_256": {
+      "file": "props_mining_track_straight_256.glb",
+      "tris": 1341
+    },
+    "models/props_mining/track_straight_64": {
+      "file": "props_mining_track_straight_64.glb",
+      "tris": 431
+    },
+    "models/props_mining/track_y_joint_arc_90": {
+      "file": "props_mining_track_y_joint_arc_90.glb",
+      "tris": 3847
+    },
+    "models/props_mining/track_y_joint_s_curve_96": {
+      "file": "props_mining_track_y_joint_s_curve_96.glb",
+      "tris": 3235
+    },
+    "models/props_trainyard/train_billboard001": {
+      "file": "props_trainyard_train_billboard001.glb",
+      "tris": 1432
     }
   },
   "version": 1

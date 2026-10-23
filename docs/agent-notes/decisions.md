@@ -177,3 +177,14 @@ m_flUniformScale is the float at offset 56.
 Known: prop models are sun-lit, boxes were baked-unlit; the extras box
 size/center for exported props is still the keyword heuristic, so the click
 tolerance and the bbox overlay are approximate for large boulders.
+
+## 2026-10-23: prop batch 2 and alpha in prop exports
+45 more models (track_*, wood_*, window*, train*, scaffolding1) exported with
+props2glb `--match '/(train|track_|wood_|window|scaffolding)' --exclude skybox`.
+The leading slash anchors to the basename so props_trainyard handrails/carts do
+not match and 3D-skybox models stay out. Alpha is now propagated for props
+only: mdl2glb keeps the PNG alpha channel and reads alphaMode/alphaCutoff from
+the VMT (opt-in keep_alpha), while the player path still strips alpha (it is a
+phong mask there). Window prop materials are OPAQUE in Source
+(`$basemapalphaphongmask`, no $translucent), so opaque glass is correct, not a
+bug. Player regression: scout red/blue GLBs byte-identical.
