@@ -139,6 +139,7 @@ def main(argv: list[str]) -> int:
         for model_index in doors:
             if model_index * 48 + 48 > len(models_raw):
                 continue
+            entry = door_models[model_index]
             vals = struct.unpack_from("<9fi2i", models_raw, model_index * 48)
             first_face, num_faces = vals[10], vals[11]
             for fi in range(first_face, first_face + num_faces):
@@ -181,8 +182,14 @@ def main(argv: list[str]) -> int:
                     if vi >= len(vertices) // 3:
                         ok = False
                         break
-                    poly.append((vertices[vi * 3], vertices[vi * 3 + 1],
-                                 vertices[vi * 3 + 2]))
+                    # Brush-model vertices are authored RELATIVE to the
+                    # entity origin (model *N space); translate them into
+                    # world space or the door ends up around (0,0,0).
+                    poly.append((
+                        vertices[vi * 3] + entry["origin"][0],
+                        vertices[vi * 3 + 1] + entry["origin"][1],
+                        vertices[vi * 3 + 2] + entry["origin"][2],
+                    ))
                 if not ok or len(poly) < 3:
                     continue
 

@@ -618,3 +618,19 @@ User request: render the cart, the (spawn) gates and the resupply machines.
   mapobj_cart_dispenser is an invisible logic entity — nothing to render.
 - Verified: validate_glb.py PASS (44986 tris, 18.35 MiB), tsc + build exit 0,
   locker GLB served 200. USER eyeball pending.
+
+## Session update — 2026-10-23 (night 4): door brush placement FIXED
+
+User: "gates and cart not visible". Two causes:
+1. Brush-model vertices are authored RELATIVE to the entity origin; the first
+   add_brushmodels_glb.py run appended them untranslated (doors buried at
+   world origin). Fixed: per-model origin translation from the func_door
+   entity. Verified in the rebuilt GLB: METALDOOR01_192 primitive bbox
+   [80..176, 256..268, 720..848] == door_red_exitC1 (origin 128 262 783).
+2. The append-only tool had run THREE times on the same GLB (two stale
+   brushmodels meshes left around). Rebuilt the whole chain from scratch —
+   the recipe (AGENTS.md) is authoritative; never re-run an append tool on
+   an already-processed GLB.
+validate_glb.py PASS (44986 tris, 18.0 MiB). Cart: confirmed all cart props
+are real meshes at BLU spawn; the MOVING cart (func_tracktrain + 175
+path_track) remains TODO (needs replay data).
