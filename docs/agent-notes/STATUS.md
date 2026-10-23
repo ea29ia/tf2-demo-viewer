@@ -498,3 +498,24 @@ dface_t lightmapMins (negative on most faces) -> affected faces collapsed to
 a single texel -> uniform bright/dark patches alternating per face. Fixed by
 subtracting mins; also reserved a proper 4x4 white cell at the atlas origin.
 Rebuilt + validate PASS + chromium render OK. User verification pending.
+
+## Session update — 2026-10-23 (latest): dark ground FIXED — $bumpmap height maps wired as normalTexture
+
+User report: props fine, ground nearly black (displacements). Root cause found
+by decoding the embedded PNGs: 12 of 21 `$bumpmap` textures are SSBump/HEIGHT
+maps (`*_height-ssbump`, `*_bump-ssbump` — grayscale height fields for
+Source self-shadowing), NOT tangent-space normal maps. `add_textures_glb.py`
+wired them into `normalTexture` anyway; a grayscale height map as a normal
+map bends tangent-space normals sideways/down (decoded means ~60/60/60
+instead of blue-dominant) -> lambert ≈ 0 -> black ground. Vertical walls with
+the same bug only lost some light, hence "ground dark, walls ok".
+
+Fix: `add_textures_glb.py` attaches normalTexture only when the bump texture
+name contains "normal" (Source convention); ssbump/height maps are skipped
+with a note (12 skipped, 9 real normal maps attached). Real SSBump shading is
+future work. GLB rebuilt FROM SCRATCH (bsp2glb -> add_textures -> add_props
+-> add_kits; re-running add_textures on an already-textured GLB appends
+duplicate PNGs — 35 MiB bloated intermediate caught and discarded).
+Verified: `validate_glb.py` PASS (18.81 MiB, 59014 tris), ground WVT
+materials now have no normalTexture, `rockwall001_normal` (B-mean 243) kept.
+USER eyeball pending.

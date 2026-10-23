@@ -318,6 +318,7 @@ def main(argv) -> int:
     blend_count = 0
     wvt_count = 0
     bump_count = 0
+    ssbump_count = 0
     detail_count = 0
     kept_color_count = 0
     no_texture: list[str] = []
@@ -374,15 +375,18 @@ def main(argv) -> int:
                       file=sys.stderr)
             # TODO: `$blendmodulatetexture` (detail-style modulation of the
             # blend weight, smoothstep-shaped) is not implemented either.
-        # $bumpmap -> normalTexture. Source normal maps are usually DXT5
-        # (X in alpha, Y in green, X/Y optionally signed) or BGR888; the
-        # existing VTF decoder covers those, and anything it cannot decode
-        # only loses this material's normal map. $bumptransform/$bumpscale
-        # UV mapping (rare) travels in extras.sourceBumpmapUV; no pl_upward
-        # material uses them (verified across all 72 VMTs).
+        # $bumpmap -> normalTexture. Only REAL tangent-space normal maps may
+        # go there: many Source $bumpmap textures are SSBump/height maps
+        # (`*_height-ssbump`, `*_bump-ssbump`) — grayscale height fields that
+        # Source self-shadows with. glTF has no ssbump slot; feeding a height
+        # map through normalTexture bends tangent-space normals sideways and
+        # the surface renders near-black (measured: mean RGB ~60/60/60 instead
+        # of blue-dominant). Source names normal maps `*_normal`, so the name
+        # is the discriminator; ssbump/height maps are skipped (smooth-lit
+        # surface) until a real SSBump shader pass exists.
         bump = resolved.get("$bumpmap")
         bump_path = vmt.normalize_texture_path(bump) if isinstance(bump, str) else ""
-        if bump_path:
+        if bump_path and "normal" in bump_path.lower():
             bump_index = embed(bump_path, size, "normal map $bumpmap")
             if bump_index is not None:
                 mat["normalTexture"] = {"index": bump_index, "texCoord": 0}
@@ -392,6 +396,11 @@ def main(argv) -> int:
                 if bump_uv:
                     extras["sourceBumpmapUV"] = bump_uv
                 bump_count += 1
+        elif bump_path:
+            ssbump_count += 1
+            print(f"note: $bumpmap {bump_path} is an SSBump/height map, "
+                  f"not attached as normalTexture ({texdata_of[mat_index]})",
+                  file=sys.stderr)
         # $detail -> extras.sourceDetail + emissiveTexture transport. The
         # detail textureIndex in extras alone is NOT resolvable by GLTFLoader
         # (it only creates textures for known material slots), so the PNG is
@@ -474,6 +483,8 @@ def main(argv) -> int:
     print(f"worldvertextransition: {wvt_count} materials with blend texture "
           f"(transport: emissiveTexture, weight: COLOR_0.r)", file=sys.stderr)
     print(f"normal maps attached: {bump_count}", file=sys.stderr)
+    print(f"ssbump/height $bumpmaps skipped (not normal maps): {ssbump_count}",
+          file=sys.stderr)
     print(f"detail maps attached: {detail_count} (transport: "
           f"emissiveTexture + extras.sourceDetail "
           f"-> textureIndex/scale/blendMode/blendFactor)",

@@ -222,3 +222,15 @@ known material slots, so the detail PNG travels in emissiveTexture (black
 emissiveFactor) exactly like the WVT blend texture; a guard refuses the slot
 if a material ever had both transports. Viewer applies Source MODULATE-2x
 (`base * detail * 2`, blendFactor-lerped) sampling vMapUv * $detailscale.
+
+## 2026-10-23 — $bumpmap → normalTexture only for real normal maps
+Source `$bumpmap` slots often hold SSBump/height maps (`*_height-ssbump`,
+`*_bump-ssbump`), which are grayscale height fields for self-shadowing, not
+tangent-space normals. Feeding them through glTF normalTexture bends normals
+sideways and darkens the surface to near-black (pl_upward ground). Decision:
+`add_textures_glb.py` attaches normalTexture only when the texture name
+contains "normal"; ssbump/height maps are skipped with a runtime note.
+Proper SSBump self-shadowing would need a custom shader pass — not planned.
+Gotcha: the GLB pipeline is append-only; rerunning add_textures on an
+already-textured GLB bloats it with orphaned PNGs — always rebuild the full
+chain from bsp2glb.
