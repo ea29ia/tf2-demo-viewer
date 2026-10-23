@@ -34,7 +34,7 @@ import {
 } from './dom';
 import { clamp, fmtTime, TEAM_RED, TEAM_BLUE } from './tf2';
 import { state, MAP_URL, REPLAY_URL, type CameraMode } from './state';
-import { scene, camera, sun, fallbackGrid, renderer } from './scene';
+import { scene, camera, sun, fill, hemi, fallbackGrid, renderer } from './scene';
 import { resetFreeCamera, updateCamera } from './camera';
 import { views, createPlayerView, viewFor, applyPose, hideAllViews } from './playerViews';
 import { posesAt } from './frameCache';
@@ -213,6 +213,21 @@ async function loadMap(): Promise<void> {
   const loader = new GLTFLoader();
   const gltf = await loader.loadAsync(MAP_URL);
 
+  // Lightmap atlas sidecar (written by bsp2glb.py next to the GLB). Applied
+  // as material.lightMap on the world mesh — glTF has no lightmap slot, so
+  // this is wired AFTER loading. Failure to load just means unlit shading.
+  let lightMap: THREE.Texture | null = null;
+  try {
+    lightMap = await new THREE.TextureLoader().loadAsync(
+      MAP_URL.replace(/\.glb$/, '_lm.png'));
+    lightMap.flipY = false;          // atlas UVs are top-left origin
+    // The baked bytes are display-referred (authored for gamma output), so
+    // mark them sRGB: decode -> linear multiply -> re-encode stays identity.
+    lightMap.colorSpace = THREE.SRGBColorSpace;
+  } catch {
+    console.warn('[map] no lightmap atlas; falling back to lit shading');
+  }
+
   gltf.scene.rotation.x = -Math.PI / 2; // Source Z-up -> three.js Y-up
 
   gltf.scene.traverse((obj) => {
@@ -226,6 +241,29 @@ async function loadMap(): Promise<void> {
       obj.material = createFallbackMapMaterial(hasColor);
     } else {
       applyMapMaterialLook(material);
+    }
+    // Baked lighting: ONLY meshes that carry TEXCOORD_1 (the world mesh;
+    // props/kits/foliage have no uv1 and must stay sun-lit). MeshBasic +
+    // lightMap renders the baked light directly — no double-lighting with
+    // the sun, which remains for players/props.
+    if (lightMap && obj.geometry.getAttribute('uv1')) {
+      const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+      for (const mat of materials) {
+        if (mat instanceof THREE.MeshStandardMaterial) {
+          const basic = new THREE.MeshBasicMaterial({
+            map: mat.map,
+            color: mat.color,
+            vertexColors: mat.vertexColors,
+            lightMap,
+            side: mat.side,
+            fog: mat.fog,
+          });
+          mat.dispose();
+          obj.material = basic;
+        } else if (mat instanceof THREE.MeshBasicMaterial) {
+          mat.lightMap = lightMap;
+        }
+      }
     }
     obj.castShadow = true;
     obj.receiveShadow = true;
@@ -275,6 +313,15 @@ async function loadMap(): Promise<void> {
     cam.far = 30000;
     cam.updateProjectionMatrix();
   }
+
+  // With baked lightmaps the world mesh no longer receives direct lights
+  // (MeshBasic ignores them), so the sun/fill/hemi only light props, kits
+  // and players. Trim their intensity so box props don't glow brighter than
+  // the baked map around them.
+  const baked = lightMap !== null;
+  sun.intensity = baked ? 1.4 : 2.6;
+  fill.intensity = baked ? 0.45 : 0.85;
+  hemi.intensity = baked ? 1.2 : 2.1;
 
   resetFreeCamera();
   applyWireframe();

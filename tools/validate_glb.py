@@ -223,13 +223,15 @@ def main(argv) -> int:
             if bad:
                 errors.append(f"{label}: {bad} POSITION values with NaN/Inf")
 
-            # TEXCOORD_0 (when present) must be finite
-            uv_index = attributes.get("TEXCOORD_0")
-            if uv_index is not None:
+            # TEXCOORD_0/TEXCOORD_1 (when present) must be finite
+            for uv_attr in ("TEXCOORD_0", "TEXCOORD_1"):
+                uv_index = attributes.get(uv_attr)
+                if uv_index is None:
+                    continue
                 uvs = accessor_values(gltf, bin_blob, uv_index)
                 bad_uv = sum(1 for uv in uvs if not finite(uv))
                 if bad_uv:
-                    errors.append(f"{label}: {bad_uv} TEXCOORD_0 values with NaN/Inf")
+                    errors.append(f"{label}: {bad_uv} {uv_attr} values with NaN/Inf")
 
             # Indices: present, non-empty, whole triangles, in range
             index_index = prim.get("indices")

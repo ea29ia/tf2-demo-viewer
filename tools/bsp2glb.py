@@ -34,6 +34,7 @@ LUMP_DISPINFO = 26
 LUMP_DISP_VERTS = 33
 LUMP_TEXDATA_STRING_DATA = 43
 LUMP_TEXDATA_STRING_TABLE = 44
+LUMP_LIGHTING = 8
 
 # dface_t v20, 56 bytes (verified against the lump length / entry count)
 FACE_STRUCT = struct.Struct("<HBBihhhh4Bif4iiHHI")
@@ -252,6 +253,82 @@ def displacement_triangles(power: int):
 
 
 # ---------------------------------------------------------------------------
+# Lightmap atlas
+# ---------------------------------------------------------------------------
+LM_ATLAS = 2048          # atlas side in texels (~1.2M luxels on upward)
+LM_GUTTER = 1            # 1px border against linear-filter bleeding
+
+
+def pack_lightmaps(rects):
+    """Shelf-pack face lightmap rects into one atlas.
+
+    `rects` is [(key, w, h), ...]. Returns {key: (x, y, w, h)} in atlas
+    texels, where (x, y) is the first LUXEL of the cell (the gutter sits at
+    x-1/y-1). Unpackable rects (larger than the atlas) are absent; callers
+    must treat them as unlit.
+    """
+    placed = {}
+    rows = []  # [y, height, cursor_x]
+    x = y = 0
+    row_h = 0
+    for key, w, h in sorted(rects, key=lambda r: -r[2]):
+        if w > LM_ATLAS or h > LM_ATLAS:
+            continue
+        if x + w > LM_ATLAS:  # start a new shelf
+            y += row_h
+            x = 0
+            row_h = 0
+        if y + h > LM_ATLAS:
+            continue  # atlas exhausted; face stays unlit
+        placed[key] = (x + LM_GUTTER, y + LM_GUTTER, w, h)
+        x += w + LM_GUTTER
+        row_h = max(row_h, h + LM_GUTTER)
+    return placed
+
+
+def build_lightmap_atlas(bsp, placed, all_faces, atlas_buf):
+    """Decode each placed face's lightmap rect into the atlas RGB buffer.
+
+    `placed` maps face_index -> (ax, ay, w, h) from pack_lightmaps();
+    `atlas_buf` is a mutable bytearray(LM_ATLAS*LM_ATLAS*3), pre-initialised
+    (the caller writes the reserved white cell before calling). Luxels are
+    BGRA; the atlas stores RGB.
+    """
+    lm = bsp.lump(LUMP_LIGHTING)
+    atlas = atlas_buf
+    for fi, (ax, ay, w, h) in placed.items():
+        face = all_faces[fi]
+        lo = face[12]
+        if lo < 0:
+            continue
+        for j in range(h):
+            src = lo + j * face[16] * 4
+            dst = ((ay + j) * LM_ATLAS + ax) * 3
+            for k in range(w):
+                atlas[dst + k * 3] = lm[src + k * 4 + 2]
+                atlas[dst + k * 3 + 1] = lm[src + k * 4 + 1]
+                atlas[dst + k * 3 + 2] = lm[src + k * 4]
+    return atlas_buf
+
+
+def write_png_rgb_bytes(width: int, height: int, rgb: bytes) -> bytes:
+    """Minimal PNG writer for 8-bit RGB (no alpha) buffers."""
+    import zlib
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        body = kind + payload
+        return struct.pack(">I", len(payload)) + body + struct.pack(">I", zlib.crc32(body) & 0xFFFFFFFF)
+    raw = bytearray()
+    for y in range(height):
+        raw.append(0)
+        raw += rgb[y * width * 3:(y + 1) * width * 3]
+    png = b"\x89PNG\r\n\x1a\n"
+    png += chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0))
+    png += chunk(b"IDAT", zlib.compress(bytes(raw), 6))
+    png += chunk(b"IEND", b"")
+    return bytes(png)
+
+
+# ---------------------------------------------------------------------------
 # Converter
 # ---------------------------------------------------------------------------
 class MeshBuilder:
@@ -260,16 +337,18 @@ class MeshBuilder:
         self.normals = array("f")
         self.colors = array("f")
         self.uvs = array("f")
+        self.lmap = array("f")   # TEXCOORD_1: lightmap atlas coords
         self.indices = array("I")
         self.vertex_count = 0
         self.min = [float("inf")] * 3
         self.max = [float("-inf")] * 3
 
-    def add_vertex(self, p, n, c, uv):
+    def add_vertex(self, p, n, c, uv, lmap):
         self.positions.extend(p)
         self.normals.extend(n)
         self.colors.extend(c)
         self.uvs.extend(uv)
+        self.lmap.extend(lmap)
         for i in range(3):
             if p[i] < self.min[i]:
                 self.min[i] = p[i]
@@ -397,8 +476,10 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
                 if 0 <= name_index < len(tex_names) else "")
         s_vec = (vals[0], vals[1], vals[2], vals[3])
         t_vec = (vals[4], vals[5], vals[6], vals[7])
+        lm_s = (vals[8], vals[9], vals[10], vals[11])
+        lm_t = (vals[12], vals[13], vals[14], vals[15])
         texinfo_cache[ti] = (
-            palette_color(name), name, s_vec, t_vec,
+            palette_color(name), name, s_vec, t_vec, lm_s, lm_t,
             float(width or 1), float(height or 1),
         )
 
@@ -425,6 +506,39 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
     flat_faces = 0
     disp_faces = 0
     fallback_faces = 0
+
+    # Face index -> atlas cell (ax, ay, w, h), filled after face iteration
+    # (see the lightmap pass below).
+    lm_cells: dict[int, tuple] = {}
+
+    def make_lmap(face_index, face, lm_s, lm_t):
+        """World position -> lightmap ATLAS UV (TEXCOORD_1).
+
+        Luxel coords come from the texinfo lightmap vectors
+        (u = P·s + shift, in luxel units); u/v are clamped to the face's
+        [0, size-1] luxel rect, then mapped into the face's atlas cell with
+        the half-luxel texel-centre offset. Unlit faces map to the reserved
+        white 2x2 cell at the atlas origin.
+        """
+        cell = lm_cells.get(face_index)
+        sx, sy = face[16], face[17]
+        lux = (lm_s[0], lm_s[1], lm_s[2])
+        luy = (lm_s[3],)
+        ltv = (lm_t[0], lm_t[1], lm_t[2])
+        lty = (lm_t[3],)
+
+        def lmap(p):
+            if cell is None:
+                return (WHITE_CELL_UV[0], WHITE_CELL_UV[1])
+            u = p[0] * lux[0] + p[1] * lux[1] + p[2] * lux[2] + luy[0]
+            v = p[0] * ltv[0] + p[1] * ltv[1] + p[2] * ltv[2] + lty[0]
+            u = max(0.0, min(float(sx - 1), u))
+            v = max(0.0, min(float(sy - 1), v))
+            ax, ay, _w, _h = cell
+            # +0.5: texel-centre sampling of the luxel grid inside the atlas
+            return ((ax + 0.5 + u) / LM_ATLAS, (ay + 0.5 + v) / LM_ATLAS)
+
+        return lmap
 
     # Stray 3D-skybox geometry lives far outside the playable world; including
     # it would destroy the bounding box.  Use the worldspawn world_mins/maxs
@@ -483,7 +597,7 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
             out.append((vertices[vi * 3], vertices[vi * 3 + 1], vertices[vi * 3 + 2]))
         return out
 
-    def add_flat(face, poly, normal, color, uv_of, mesh):
+    def add_flat(face, poly, normal, color, uv_of, lmap_of, mesh):
         # Brush faces accumulate near-duplicate and collinear vertices from
         # plane splits; a naive fan over them emits zero-area triangles and
         # long needle slivers that stick out of the surface (visible as
@@ -493,12 +607,12 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
             return
         base = mesh.vertex_count
         for p in cleaned:
-            mesh.add_vertex(p, normal, color, uv_of(p))
+            mesh.add_vertex(p, normal, color, uv_of(p), lmap_of(p))
         for tri in ear_clip(cleaned, normal):
             mesh.add_triangle(base + tri[0], base + tri[1],
                               base + tri[2], normal)
 
-    def add_displacement(face, poly, face_normal, color, uv_of, mesh):
+    def add_displacement(face, poly, face_normal, color, uv_of, lmap_of, mesh):
         disp_index = face[6]
         start = disp_index * DISPINFO_SIZE
         if start + DISPINFO_STRUCT.size > len(dispinfo_raw) or len(poly) != 4:
@@ -560,24 +674,74 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
 
         base = mesh.vertex_count
         for i, p in enumerate(positions):
-            mesh.add_vertex(p, normals[i], color, uv_of(p))
+            mesh.add_vertex(p, normals[i], color, uv_of(p), lmap_of(p))
         for tri in displacement_triangles(power):
             a, b, c = tri
             ref = normals[a]
             mesh.add_triangle(base + a, base + b, base + c, ref)
         return True
 
-    for face in bsp.faces():
+    all_faces = list(bsp.faces())
+
+    # --- Lightmap atlas pass (must run before vertex emission) -------------
+    # Collect the faces that will actually emit geometry (same filters as the
+    # main loop), pack their lightmap rects, then emit TEXCOORD_1 alongside
+    # TEXCOORD_0 below.
+    def face_passes_filters(face, info):
+        if info is None or info[0] is None:
+            return False
+        plane_index = face[0]
+        if plane_index >= len(planes):
+            return False
+        poly = face_polygon(face)
+        if len(poly) < 3:
+            return False
+        if outside_world(poly):
+            return False
+        return True
+
+    emitted_indices = []
+    for fi, face in enumerate(all_faces):
+        info = texinfo_cache.get(face[5])
+        if not face_passes_filters(face, info):
+            continue
+        emitted_indices.append(fi)
+
+    # Reserve a 2x2 white cell at (0,0) for unlit faces (lightofs = -1 or
+    # unpackable rects); write its RGB first.
+    white_cell = bytearray(LM_ATLAS * LM_ATLAS * 3)
+    for j in range(2):
+        for i in range(2):
+            k = ((j) * LM_ATLAS + i) * 3
+            white_cell[k] = 255
+            white_cell[k + 1] = 255
+            white_cell[k + 2] = 255
+
+    WHITE_CELL_UV = (1.0 / LM_ATLAS, 1.0 / LM_ATLAS)
+
+    rects = []
+    for fi in emitted_indices:
+        face = all_faces[fi]
+        if face[12] >= 0 and 0 < face[16] <= LM_ATLAS and 0 < face[17] <= LM_ATLAS:
+            rects.append((fi, face[16], face[17]))
+    placed = pack_lightmaps(rects)
+    lm_cells.update(placed)
+
+    build_lightmap_atlas(bsp, placed, all_faces, white_cell)
+    atlas_bytes = bytes(white_cell)
+
+    for fi, face in enumerate(all_faces):
         tex_info = face[5]
         info = texinfo_cache.get(tex_info)
         if info is None or info[0] is None:
             skipped_faces += 1
             continue
-        color, name, s_vec, t_vec, width, height = info
+        color, name, s_vec, t_vec, lm_s, lm_t, width, height = info
         mesh = builders.get(name)
         if mesh is None:
             mesh = builders[name] = MeshBuilder()
         uv_of = make_uv((s_vec, t_vec, width, height))
+        lmap_of = make_lmap(fi, face, lm_s, lm_t)
         plane_index = face[0]
         if plane_index >= len(planes):
             continue
@@ -593,18 +757,19 @@ def build(bsp: Bsp) -> dict[str, MeshBuilder]:
             skipped_outside += 1
             continue
         if face[6] >= 0:
-            if add_displacement(face, poly, face_normal, color, uv_of, mesh):
+            if add_displacement(face, poly, face_normal, color, uv_of, lmap_of, mesh):
                 disp_faces += 1
                 continue
             fallback_faces += 1
-        add_flat(face, poly, face_normal, color, uv_of, mesh)
+        add_flat(face, poly, face_normal, color, uv_of, lmap_of, mesh)
         flat_faces += 1
 
     print(f"faces: {flat_faces} flat, {disp_faces} displaced, "
           f"{fallback_faces} displacement fallbacks, {skipped_faces} skipped tool/sky, "
-          f"{skipped_outside} skipped out-of-world, {len(builders)} materials",
+          f"{skipped_outside} skipped out-of-world, {len(builders)} materials, "
+          f"{len(placed)} lightmapped",
           file=sys.stderr)
-    return builders
+    return builders, atlas_bytes
 
 
 # ---------------------------------------------------------------------------
@@ -652,12 +817,14 @@ def write_glb(path: str, builders: dict[str, MeshBuilder], name: str = "pl_upwar
         nrm = mesh.normals.tobytes()
         col = mesh.colors.tobytes()
         uv = mesh.uvs.tobytes()
+        lmap = mesh.lmap.tobytes()
         idx = mesh.indices.tobytes()
 
         v_pos = add_blob(pos, 34962)
         v_nrm = add_blob(nrm, 34962)
         v_col = add_blob(col, 34962)
         v_uv = add_blob(uv, 34962)
+        v_lmap = add_blob(lmap, 34962)
         v_idx = add_blob(idx, 34963)
 
         base = len(accessors)
@@ -672,6 +839,8 @@ def write_glb(path: str, builders: dict[str, MeshBuilder], name: str = "pl_upwar
             {"bufferView": v_col, "componentType": 5126,
              "count": mesh.vertex_count, "type": "VEC3"},
             {"bufferView": v_uv, "componentType": 5126,
+             "count": mesh.vertex_count, "type": "VEC2"},
+            {"bufferView": v_lmap, "componentType": 5126,
              "count": mesh.vertex_count, "type": "VEC2"},
             {"bufferView": v_idx, "componentType": 5125,
              "count": len(mesh.indices), "type": "SCALAR"},
@@ -693,8 +862,9 @@ def write_glb(path: str, builders: dict[str, MeshBuilder], name: str = "pl_upwar
                 "NORMAL": base + 1,
                 "COLOR_0": base + 2,
                 "TEXCOORD_0": base + 3,
+                "TEXCOORD_1": base + 4,
             },
-            "indices": base + 4,
+            "indices": base + 5,
             "material": len(materials) - 1,
             "mode": 4,
         })
@@ -738,11 +908,18 @@ def main(argv) -> int:
         return 2
     bsp = Bsp(argv[1])
     print(f"{argv[1]}: VBSP v{bsp.version}", file=sys.stderr)
-    builders = build(bsp)
+    builders, atlas_bytes = build(bsp)
     if not builders or not any(m.indices for m in builders.values()):
         print("error: no renderable geometry", file=sys.stderr)
         return 1
     write_glb(argv[2], builders)
+    # Lightmap atlas sidecar: <glb-stem>_lm.png next to the GLB (the web
+    # viewer loads it as material.lightMap — GLTF has no lightmap slot).
+    atlas_path = os.path.splitext(argv[2])[0] + "_lm.png"
+    with open(atlas_path, "wb") as f:
+        f.write(write_png_rgb_bytes(LM_ATLAS, LM_ATLAS, atlas_bytes))
+    print(f"wrote {atlas_path}: {LM_ATLAS}x{LM_ATLAS} lightmap atlas",
+          file=sys.stderr)
     return 0
 
 
