@@ -369,3 +369,12 @@ None = legal absence). All 70 embedded PNGs re-verified by byte-level parse
 (sig + IHDR + IDAT inflate + raw size). Final: 16.23 MiB GLB, PASS,
 chromium renders textured map, overlay hidden, [inspect] 1212, no errors.
 USER Firefox eyeball pending (hard reload; signs RED/BLU orientation, seams).
+
+## Session update — 2026-10-23 (night, final): user CONFIRMED textured map
+User eyeballed the viewer in Firefox: textured pl_upward map is correct
+(signs, seams, brightness all OK). Map-render phase 2 (brush textures) is
+closed end-to-end. Next up per the approved roadmap: phase 3 = lightmap
+atlas (BSP lump 8, 15110 faces, ~1.2M luxels -> 2048^2 atlas, TEXCOORD_1 +
+lightMap on MeshStandardMaterial; 581 faces have no lightmap -> white),
+phase 4 = real prop meshes via props2glb.py + InstancedMesh (234 unique
+models / 1244 instances).
