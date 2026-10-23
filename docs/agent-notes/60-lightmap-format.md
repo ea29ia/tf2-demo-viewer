@@ -66,3 +66,19 @@ Format findings below remain the reference for other maps / rework.
 - Displaced faces: lightmap projection is linear over the BASE quad; sampling
   displaced vertices with the same formula is approximate (validate visually).
 - `worldLightDistance`/style fields beyond style 0 ignored (switchable lights).
+
+## Gotchas added at implementation (2026-10-23, black-screen bug)
+
+- **three.js `Texture.channel` defaults to 0.** Without
+  `lightMap.channel = 1` the lightmap samples from uv (tiled TEXCOORD_0,
+  range -4..4), not uv1 — random atlas lookups, mostly the black background:
+  the whole map goes black/patchy. This is the #1 suspect for any
+  "all black after lightmaps" report.
+- **three.js multiplies the lightmap by RECIPROCAL_PI (1/pi)** in
+  meshbasic/meshstandard shaders (lambert indirect normalisation). Source
+  bakes the final display value, so set `lightMapIntensity = Math.PI` to
+  undo the 3.14x darkening; without it the map is ~3 stops too dark.
+- Headless chromium showed NO error for both bugs (just a dark render);
+  the user's report was the only reliable signal. Numeric brightness stats
+  of screenshots (mean / %pixels>60) did move measurably and are a cheap
+  proxy: pre-fix 13.7/0.6%, post-fix 33.2/12.0%.

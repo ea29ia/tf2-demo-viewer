@@ -407,3 +407,13 @@ models / 1244 instances).
   darkness, overall exposure).
 - Implementation details/gotchas: see 60-lightmap-format.md (its "sketch"
   section is now implemented; gamma question resolved via SRGBColorSpace).
+
+## Session update — 2026-10-23 (lightmap black screen FIXED)
+User reported "all black" after the lightmap commit. Root causes (both in
+playback.ts, fixed same commit area):
+1. Texture.channel defaults to 0 -> lightMap sampled from tiled uv, not uv1
+   (set lightMap.channel = 1);
+2. three.js RECIPROCAL_PI dims the baked map 3.14x
+   (set lightMapIntensity = Math.PI).
+Post-fix headless stats: mean 13.7 -> 33.2, bright pixels 0.6% -> 12.0%.
+Gotchas recorded in 60-lightmap-format.md. USER verification pending.

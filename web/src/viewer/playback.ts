@@ -221,6 +221,7 @@ async function loadMap(): Promise<void> {
     lightMap = await new THREE.TextureLoader().loadAsync(
       MAP_URL.replace(/\.glb$/, '_lm.png'));
     lightMap.flipY = false;          // atlas UVs are top-left origin
+    lightMap.channel = 1;            // sample from uv1 (TEXCOORD_1), NOT uv
     // The baked bytes are display-referred (authored for gamma output), so
     // mark them sRGB: decode -> linear multiply -> re-encode stays identity.
     lightMap.colorSpace = THREE.SRGBColorSpace;
@@ -258,10 +259,15 @@ async function loadMap(): Promise<void> {
             side: mat.side,
             fog: mat.fog,
           });
+          // three.js multiplies the lightmap by RECIPROCAL_PI (1/pi) as the
+          // lambert indirect-diffuse normalisation; Source bakes the final
+          // display value already, so undo the 3.14x darkening here.
+          basic.lightMapIntensity = Math.PI;
           mat.dispose();
           obj.material = basic;
         } else if (mat instanceof THREE.MeshBasicMaterial) {
           mat.lightMap = lightMap;
+          mat.lightMapIntensity = Math.PI;
         }
       }
     }
