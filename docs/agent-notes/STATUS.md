@@ -417,3 +417,11 @@ playback.ts, fixed same commit area):
    (set lightMapIntensity = Math.PI).
 Post-fix headless stats: mean 13.7 -> 33.2, bright pixels 0.6% -> 12.0%.
 Gotchas recorded in 60-lightmap-format.md. USER verification pending.
+
+## Session update — 2026-10-23 (checkerboard FIXED, cause found)
+User reported checkerboard brightness after the lightmap phase. Root cause:
+make_lmap clamped the luxel projection to [0, size-1] instead of shifting by
+dface_t lightmapMins (negative on most faces) -> affected faces collapsed to
+a single texel -> uniform bright/dark patches alternating per face. Fixed by
+subtracting mins; also reserved a proper 4x4 white cell at the atlas origin.
+Rebuilt + validate PASS + chromium render OK. User verification pending.

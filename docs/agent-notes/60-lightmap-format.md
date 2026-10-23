@@ -82,3 +82,21 @@ Format findings below remain the reference for other maps / rework.
   the user's report was the only reliable signal. Numeric brightness stats
   of screenshots (mean / %pixels>60) did move measurably and are a cheap
   proxy: pre-fix 13.7/0.6%, post-fix 33.2/12.0%.
+
+## Gotcha added 2026-10-23 (checkerboard bug — the big one)
+
+- **The luxel projection spans [mins, mins + size - 1], NOT [0, size-1].**
+  dface_t lightmapMinsInLuxels (f[14], f[15]) is the block origin in luxel
+  space and is frequently NEGATIVE (the grid extends half a luxel past the
+  face edges). The atlas-relative coordinate is u - mins_x / v - mins_y.
+  Clamping to [0, size-1] instead of shifting collapses every vertex of such
+  a face to ONE texel — the face renders as a uniform patch, some patches
+  bright / some dark => the "checkerboard brightness" the user reported.
+  Verified before the fix: u-span fit [mins, mins+size-1] on 73/73 faces
+  with mins < -5; u_in_zero count 0.
+- Also: pack_lightmaps now reserves a WHITE_CELL=4 texel white square at the
+  atlas origin; the old 2x2 cell overlapped the first packed rect's first
+  texel, so unlit faces sampled that face's lumel.
+- Dark atlas cells (~55% of faces) are LEGITIMATE: back-sides of brushes
+  (facing into the void, never visible in-game) and enclosed interiors bake
+  black. Do not "fix" them.
