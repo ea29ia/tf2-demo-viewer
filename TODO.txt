@@ -96,3 +96,14 @@ real aim-accuracy profile from a demo.
 2. Statistics pass (offline script or in-viewer): produce per-sniper report.
 3. UI section: select a sniper -> shot list, deviation histogram, hit-rate;
    optionally draw rays (see hit-scan lines idea).
+
+## Текстуры карты (статус 2026-10-23)
+- Фаза 1 сделана: GLB теперь один примитив на материал (72 на upward) с UV из
+  texinfo; тулзы-фундамент есть: tools/vmt.py (парсер VMT + patch,
+  регистронезависимый), tools/texres.py (резолвер BSP pak → tf2_misc →
+  tf2_textures; все 126 VTF upward резолвятся, 56.5 MiB сырых).
+- Дальше: встроить текстуры в GLB (без жёсткого лимита размера; стартовая
+  политика: топ-20 по площади 512px, остальные 256px, потом замер), затем
+  атлас лайтмапов (15110 фейсов, ~1.2M люкселей → атлас 2048²), потом реальные
+  меши пропов через tools/props2glb.py (234 уникальных моделей / 1244
+  инстансов в sprp upward).

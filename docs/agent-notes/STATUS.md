@@ -279,3 +279,42 @@ cd web && npx tsc --noEmit && npm run build
   file — remove after user confirmation.
 - Packed the offline copy for transfer: /tmp/opencode/tf2_19.tar.zst (128 MB,
   zstd -19) and tf2.tar.zst (150 MB, zstd -3).
+
+## Session update — 2026-10-23: map-render phase 1 (UV + per-material GLB)
+
+Roadmap (user-approved, in docs/agent-notes/HANDOFF-style plan): textures →
+lightmaps → real prop meshes → special materials → skybox. "No size limits"
+and "all 234 prop models, gradually".
+
+- **bsp2glb.py rewritten**: one primitive per used texdata material (upward:
+  72) with TEXCOORD_0 from texinfo s/t vectors, vertex colors kept. Final GLB
+  after add props+kits: 4 meshes (world/props/foliage/kits), 74 materials,
+  58538 tris, 3.99 MiB, validate_glb.py PASS. UV verified NaN-free; the
+  chessboard/texel-density check is still pending (next session).
+- **add_props_glb.py / add_kits_glb.py rewritten**: append-only — new meshes
+  at the end of the BIN, existing bufferViews/accessors untouched. extras.props
+  stays on node 0 (1212 entries = 1182 props + 30 kits, same as before).
+- **validate_glb.py rewritten**: validates ALL meshes/primitives (bbox over
+  all POSITION accessors, index ranges, UV NaN check, per-mesh summary).
+- **web/viewer/playback.ts**: loadMap() keeps GLTF materials (flatShading
+  overlay + fallback); wireframe toggle handles material arrays. tsc + build
+  exit 0; headless chromium renders the new GLB, [inspect] prop entries
+  loaded: 1212, no page errors. USER eyeball round still pending (heuristic #7).
+- **tools/vmt.py (new)**: KeyValues parser + patch resolver, case-insensitive
+  keys (camelCase $baseTexture is everywhere in TF2 VMTs).
+- **tools/texres.py (new)**: BSP→VMT→VTF resolver + report. upward: 123 VMTs
+  resolved (pak=5, tf2_misc=118), 126/126 VTFs resolved (tf2_textures),
+  56.5 MiB raw; 3 texdata names have no VMT (DEV/REFLECTIVITY_30,
+  DEV/REFLECTIVITY_10B, water/water_well_beneath). Mip self-consistency on map
+  textures: mean|diff| 1.01 (DXT1) / 1.70 (DXT5) — chain order verified.
+- **tools/props2glb.py (new)**: sprp enumeration + top-N prop export via the
+  mdl2glb pipeline. Top 5 (light_cone_farm_32 x80, light_fluorescent_basement
+  x46, boulder_pile2 x43, oildrum x36, track_straight_256 x31) exported to
+  /tmp/opencode/props — structurally valid, textures resolved, headless render
+  OK. Scout regression: byte-identical to shipped scout_red.glb.
+- **Corrections to older notes**: static-prop counts are 234 unique / 1244
+  instances (sprp), NOT 88/123 (entity lump); scout GLB is 7814 tris, NOT 5120
+  (figure predates the winding/origMeshVertID fixes).
+- **Not done yet / next**: chessboard UV density check; embed resolved textures
+  into the GLB (size policy: no hard limit per user; suggested top-20@512 /
+  rest@256 then measure); lightmap atlas; prop InstancedMesh wiring in web.

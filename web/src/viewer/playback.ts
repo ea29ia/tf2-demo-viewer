@@ -176,6 +176,39 @@ function setLoadState(state: 'ok' | 'err' | 'idle'): void {
   loadDot.classList.toggle('err', state === 'err');
 }
 
+/**
+ * Fallback used only when a GLB mesh arrives without any material. Mirrors the
+ * look the viewer used to force on every map mesh (grey-blue untextured
+ * brushes, vertex colours when the geometry carries a COLOR_0 attribute).
+ */
+function createFallbackMapMaterial(hasVertexColors: boolean): THREE.MeshStandardMaterial {
+  return new THREE.MeshStandardMaterial({
+    vertexColors: hasVertexColors,
+    color: hasVertexColors ? 0xffffff : 0x8d9aab,
+    roughness: 0.92,
+    metalness: 0.02,
+    flatShading: true,
+    side: THREE.DoubleSide,
+  });
+}
+
+/**
+ * Overlay the viewer look on the materials authored by the map exporter
+ * (one glTF material per primitive). The materials themselves are kept — they
+ * own the per-material factors and textures — only the shading flags are
+ * overridden. Accepts a single material or a material array.
+ */
+function applyMapMaterialLook(material: THREE.Material | THREE.Material[]): void {
+  const materials = Array.isArray(material) ? material : [material];
+  for (const mat of materials) {
+    if (!mat) continue;
+    if ('flatShading' in mat) {
+      (mat as THREE.MeshStandardMaterial).flatShading = true;
+      mat.needsUpdate = true; // flatShading is compiled into the shader
+    }
+  }
+}
+
 async function loadMap(): Promise<void> {
   const loader = new GLTFLoader();
   const gltf = await loader.loadAsync(MAP_URL);
@@ -184,16 +217,16 @@ async function loadMap(): Promise<void> {
 
   gltf.scene.traverse((obj) => {
     if (!(obj instanceof THREE.Mesh)) return;
-    const geometry = obj.geometry;
-    const hasColor = Boolean(geometry.getAttribute('color'));
-    obj.material = new THREE.MeshStandardMaterial({
-      vertexColors: hasColor,
-      color: hasColor ? 0xffffff : 0x8d9aab,
-      roughness: 0.92,
-      metalness: 0.02,
-      flatShading: true,
-      side: THREE.DoubleSide,
-    });
+    const hasColor = Boolean(obj.geometry.getAttribute('color'));
+    const material: THREE.Material | THREE.Material[] | undefined = obj.material;
+    const missingMaterial =
+      !material ||
+      (Array.isArray(material) && (material.length === 0 || material.every((m) => !m)));
+    if (missingMaterial) {
+      obj.material = createFallbackMapMaterial(hasColor);
+    } else {
+      applyMapMaterialLook(material);
+    }
     obj.castShadow = true;
     obj.receiveShadow = true;
     obj.frustumCulled = true;
@@ -348,12 +381,18 @@ hideFoliageInput.addEventListener('change', () => {
   for (const mesh of state.foliageMeshes) mesh.visible = !hideFoliageInput.checked;
 });
 
-// Wireframe toggle: flips material.wireframe on every map + foliage mesh.
+// Wireframe toggle: flips material.wireframe on every map + foliage mesh
+// (material arrays included — one glTF mesh may carry several primitives).
 // The geometry is already in the loaded GLB, so this costs nothing extra.
 function applyWireframe(): void {
+  const enabled = wireframeInput.checked;
   for (const mesh of [...state.mapMeshes, ...state.foliageMeshes]) {
-    const mat = mesh.material as THREE.MeshStandardMaterial | undefined;
-    if (mat && 'wireframe' in mat) mat.wireframe = wireframeInput.checked;
+    const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of materials) {
+      if (mat && 'wireframe' in mat) {
+        (mat as THREE.MeshStandardMaterial).wireframe = enabled;
+      }
+    }
   }
 }
 wireframeInput.addEventListener('change', applyWireframe);

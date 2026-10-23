@@ -74,6 +74,11 @@ EOF
 - `tf2_misc_dir.vpk` holds MDL/VVD/VTX/VMT; `tf2_textures_dir.vpk` holds VTF.
 
 ### MDL (version 48)
+- **Correction (2026-10-23):** the scout figures below predate the winding
+  (f03389e) and origMeshVertID-deref fixes; the current exporter produces
+  **7814 triangles / 8261 lod0 verts** for scout (verified byte-identical to
+  the shipped scout_red.glb). The per-bodygroup tri math that follows is kept
+  for structure reference only — do not trust its totals.
 - Header field offsets (i32 unless noted): version 4, checksum 8, name 12,
   numtextures 204, textureindex 208, numcdtextures 212 (NOT used — cdtexture
   strings read garbage; texture path resolution uses the texture names),

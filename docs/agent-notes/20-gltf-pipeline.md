@@ -8,9 +8,14 @@
 ## State
 
 `pl_upward.bsp` (v20) → `pl_upward.glb` pipeline works and is validated. Chain:
-`bsp2glb.py` (brushes + displacements, vertex colors) → `add_props_glb.py`
-(oriented prop boxes, foliage split, extras metadata) → `add_kits_glb.py`
-(kit pads + kit extras) → `validate_glb.py` (must print PASS).
+`bsp2glb.py` (brushes + displacements, vertex colors, one primitive PER
+texdata material with TEXCOORD_0; 72 primitives for upward) →
+`add_props_glb.py` (appends a "props" + "foliage" mesh, oriented prop boxes,
+extras metadata) → `add_kits_glb.py` (appends a "kits" mesh + kit extras) →
+`validate_glb.py` (validates ALL meshes/primitives, must print PASS).
+Texture resolution groundwork: `tools/vmt.py` (KeyValues/patch, case-insensitive)
++ `tools/texres.py` (BSP pak → tf2_misc/tf2_textures resolver + report);
+all 126 upward VTFs resolve, none committed.
 
 ## Gotchas
 
@@ -41,5 +46,8 @@
 
 ## Open questions
 
-- Real prop meshes (MDL) are blocked on VPK access; boxes stay for now.
-  `probe_props.py` is the reference for parsing the sprp lump.
+- Chessboard/texel-density check of the new TEXCOORD_0 (planned, see STATUS
+  2026-10-23) before embedding real textures.
+- Real prop meshes: unblocked; `tools/props2glb.py` exports top-N models via
+  the mdl2glb pipeline (verified on upward top-5). `probe_props.py` remains the
+  reference for the sprp lump (234 unique models / 1244 instances on upward).

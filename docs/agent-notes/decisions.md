@@ -88,3 +88,33 @@ below it ("VTF mip order was the root cause of wrong textures"): the chain is
 smallest-FIRST, mip 0 (full res) is the LAST mip_size bytes of image data.
 Append-only log, so the wrong line stays — trust this entry and vtf.py's
 comment, not the one-liner.
+
+## 2026-10-23: map GLB = one primitive per texdata material + TEXCOORD_0
+bsp2glb.py now emits one primitive per used texdata name (upward: 72) with
+TEXCOORD_0 derived from the texinfo s/t vectors (u = (P·s + shift)/texW; no
+V flip — Source texel origin already matches glTF). Materials carry the
+texdata name in extras. Why: per-material textures need per-material
+primitives, and tiling rules out atlasing. Rejected: keeping the single
+primitive (cannot bind maps per surface); atlas (breaks REPEAT tiling).
+
+## 2026-10-23: props/kits appended as separate GLB meshes, never rewritten
+add_props_glb.py / add_kits_glb.py now APPEND "props"/"foliage"/"kits" meshes
+at the end of the BIN chunk and only add bufferViews/accessors. Why: the
+world mesh is now multi-primitive (72); the old rewrite-everything approach
+would have destroyed it. extras.props stays on node 0 (click-inspect
+contract), kits append to it. Invariants verified: bufferViews in bounds,
+indices < vertex counts, world total 67310 verts / 43994 tris unchanged.
+
+## 2026-10-23: VMT keys parse case-insensitively
+TF2 map/prop VMTs frequently spell keys in camelCase ("$baseTexture" —
+10,130 of 25,914 VPK VMTs). The case-sensitive regex silently dropped
+$basetexture and fell back to coincidental MDL texture names. vmt.py now
+lowercases keys at parse time; props2glb's PropTextures regex is
+re.IGNORECASE. Rejected: leaving mdl2glb's shared regex case-sensitive
+(player exports currently byte-identical; changing it needs its own
+verified pass).
+
+## 2026-10-23: sprp lump is the authoritative static-prop source
+pl_upward: 234 unique models / 1244 sprp instances (vs 88 unique / 123 refs
+in the entity lump — that only lists prop_* entities). All prop planning
+counts come from probe_props.py's sprp parse, not the entity lump.

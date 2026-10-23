@@ -47,6 +47,11 @@ DISPINFO_STRUCT = struct.Struct("<3fiiii")  # start, firstvert, firsttri, power,
 DISPINFO_SIZE = 176
 DISPVERT_STRUCT = struct.Struct("<5f")  # vec3, dist, alpha
 
+# texdata_t is 32 bytes: reflectivity vec3, nameStringTableID, width, height,
+# view_width, view_height. Width/height are needed to normalise the texinfo
+# texture vectors into glTF UV space.
+TEXDATA_SIZE = 32
+
 HEADER_LUMP_STRUCT = struct.Struct("<4i")  # fileofs, filelen, version, uncompressed
 
 
@@ -144,9 +149,15 @@ class Bsp:
             names.append(string_data[off:end].decode("latin-1"))
         return names
 
-    def texdata_name_indices(self):
+    def texdata_entries(self):
+        """Return [(name_string_index, width, height)] per texdata_t."""
         raw = self.lump(LUMP_TEXDATA)
-        return [struct.unpack_from("<i", raw, i + 12)[0] for i in range(0, len(raw) - 15, 32)]
+        out = []
+        for i in range(0, len(raw) - TEXDATA_SIZE + 1, TEXDATA_SIZE):
+            name_index = struct.unpack_from("<i", raw, i + 12)[0]
+            width, height = struct.unpack_from("<ii", raw, i + 16)
+            out.append((name_index, width, height))
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -248,15 +259,17 @@ class MeshBuilder:
         self.positions = array("f")
         self.normals = array("f")
         self.colors = array("f")
+        self.uvs = array("f")
         self.indices = array("I")
         self.vertex_count = 0
         self.min = [float("inf")] * 3
         self.max = [float("-inf")] * 3
 
-    def add_vertex(self, p, n, c):
+    def add_vertex(self, p, n, c, uv):
         self.positions.extend(p)
         self.normals.extend(n)
         self.colors.extend(c)
+        self.uvs.extend(uv)
         for i in range(3):
             if p[i] < self.min[i]:
                 self.min[i] = p[i]
@@ -358,26 +371,55 @@ def _point_in_tri(p, a, b, c, u, v):
     return not (has_neg and has_pos)
 
 
-def build(bsp: Bsp) -> MeshBuilder:
+def build(bsp: Bsp) -> dict[str, MeshBuilder]:
     planes = bsp.planes()
     vertices = bsp.vertices()
     edges = bsp.edges()
     surfedges = bsp.surfedges()
     texinfo_raw = bsp.lump(LUMP_TEXINFO)
     tex_names = bsp.texture_names()
-    texdata_names = bsp.texdata_name_indices()
+    texdata = bsp.texdata_entries()
     dispinfo_raw = bsp.lump(LUMP_DISPINFO)
     dispverts_raw = bsp.lump(LUMP_DISP_VERTS)
 
-    # texinfo index -> (skip, color, texture name)
+    # texinfo index -> (skip, color, texture name, texinfo texture vectors).
+    # texinfo_t: 8 floats of texture vecs (s.xyz, s.shift, t.xyz, t.shift),
+    # 8 floats of lightmap vecs, flags, texdata index.
     texinfo_cache = {}
     for ti in range(len(texinfo_raw) // TEXINFO_STRUCT.size):
         vals = TEXINFO_STRUCT.unpack_from(texinfo_raw, ti * TEXINFO_STRUCT.size)
-        texdata = vals[-1]
-        name = tex_names[texdata_names[texdata]] if 0 <= texdata < len(texdata_names) else ""
-        texinfo_cache[ti] = (palette_color(name), name)
+        texdata_index = vals[-1]
+        if 0 <= texdata_index < len(texdata):
+            name_index, width, height = texdata[texdata_index]
+        else:
+            name_index, width, height = -1, 0, 0
+        name = (tex_names[name_index]
+                if 0 <= name_index < len(tex_names) else "")
+        s_vec = (vals[0], vals[1], vals[2], vals[3])
+        t_vec = (vals[4], vals[5], vals[6], vals[7])
+        texinfo_cache[ti] = (
+            palette_color(name), name, s_vec, t_vec,
+            float(width or 1), float(height or 1),
+        )
 
-    mesh = MeshBuilder()
+    def make_uv(texinfo):
+        """World position -> normalised texture UV (Source texinfo projection).
+
+        u = (P . s + s.shift) / texWidth, v = (P . t + t.shift) / texHeight.
+        Source textures use a top-left origin, which matches glTF's UV
+        convention (GLTFLoader loads images with flipY = false), so no V flip.
+        """
+        s_vec, t_vec, width, height = texinfo
+        sx, sy, sz, s_shift = s_vec
+        tx, ty, tz, t_shift = t_vec
+
+        def uv(p):
+            return ((p[0] * sx + p[1] * sy + p[2] * sz + s_shift) / width,
+                    (p[0] * tx + p[1] * ty + p[2] * tz + t_shift) / height)
+
+        return uv
+
+    builders: dict[str, MeshBuilder] = {}
     skipped_faces = 0
     skipped_outside = 0
     flat_faces = 0
@@ -441,7 +483,7 @@ def build(bsp: Bsp) -> MeshBuilder:
             out.append((vertices[vi * 3], vertices[vi * 3 + 1], vertices[vi * 3 + 2]))
         return out
 
-    def add_flat(face, poly, normal, color):
+    def add_flat(face, poly, normal, color, uv_of, mesh):
         # Brush faces accumulate near-duplicate and collinear vertices from
         # plane splits; a naive fan over them emits zero-area triangles and
         # long needle slivers that stick out of the surface (visible as
@@ -451,12 +493,12 @@ def build(bsp: Bsp) -> MeshBuilder:
             return
         base = mesh.vertex_count
         for p in cleaned:
-            mesh.add_vertex(p, normal, color)
+            mesh.add_vertex(p, normal, color, uv_of(p))
         for tri in ear_clip(cleaned, normal):
             mesh.add_triangle(base + tri[0], base + tri[1],
                               base + tri[2], normal)
 
-    def add_displacement(face, poly, face_normal, color):
+    def add_displacement(face, poly, face_normal, color, uv_of, mesh):
         disp_index = face[6]
         start = disp_index * DISPINFO_SIZE
         if start + DISPINFO_STRUCT.size > len(dispinfo_raw) or len(poly) != 4:
@@ -518,7 +560,7 @@ def build(bsp: Bsp) -> MeshBuilder:
 
         base = mesh.vertex_count
         for i, p in enumerate(positions):
-            mesh.add_vertex(p, normals[i], color)
+            mesh.add_vertex(p, normals[i], color, uv_of(p))
         for tri in displacement_triangles(power):
             a, b, c = tri
             ref = normals[a]
@@ -531,7 +573,11 @@ def build(bsp: Bsp) -> MeshBuilder:
         if info is None or info[0] is None:
             skipped_faces += 1
             continue
-        color, _name = info
+        color, name, s_vec, t_vec, width, height = info
+        mesh = builders.get(name)
+        if mesh is None:
+            mesh = builders[name] = MeshBuilder()
+        uv_of = make_uv((s_vec, t_vec, width, height))
         plane_index = face[0]
         if plane_index >= len(planes):
             continue
@@ -547,17 +593,18 @@ def build(bsp: Bsp) -> MeshBuilder:
             skipped_outside += 1
             continue
         if face[6] >= 0:
-            if add_displacement(face, poly, face_normal, color):
+            if add_displacement(face, poly, face_normal, color, uv_of, mesh):
                 disp_faces += 1
                 continue
             fallback_faces += 1
-        add_flat(face, poly, face_normal, color)
+        add_flat(face, poly, face_normal, color, uv_of, mesh)
         flat_faces += 1
 
     print(f"faces: {flat_faces} flat, {disp_faces} displaced, "
           f"{fallback_faces} displacement fallbacks, {skipped_faces} skipped tool/sky, "
-          f"{skipped_outside} skipped out-of-world", file=sys.stderr)
-    return mesh
+          f"{skipped_outside} skipped out-of-world, {len(builders)} materials",
+          file=sys.stderr)
+    return builders
 
 
 # ---------------------------------------------------------------------------
@@ -567,56 +614,107 @@ def pad4(data: bytes, fill: bytes = b"\0") -> bytes:
     return data + fill * ((4 - len(data) % 4) % 4)
 
 
-def write_glb(path: str, mesh: MeshBuilder) -> None:
-    pos = mesh.positions.tobytes()
-    nrm = mesh.normals.tobytes()
-    col = mesh.colors.tobytes()
-    idx = mesh.indices.tobytes()
+def write_glb(path: str, builders: dict[str, MeshBuilder], name: str = "pl_upward") -> None:
+    """Write one mesh with one primitive per material (texture) name.
 
-    offsets = []
-    chunks = []
+    Splitting per material is what lets the viewer (and later the texture
+    step) bind a separate map per brush surface while keeping the geometry in
+    a single file. Every builder carries POSITION/NORMAL/COLOR_0/TEXCOORD_0.
+    """
+    views: list[dict] = []
+    blobs: list[bytes] = []
     cursor = 0
-    for blob in (pos, nrm, col, idx):
-        offsets.append(cursor)
-        chunks.append(blob)
-        cursor += len(blob)
-    total_bin = cursor
 
-    vertex_count = mesh.vertex_count
-    index_count = len(mesh.indices)
+    def add_blob(data: bytes, target: int) -> int:
+        nonlocal cursor
+        padded = pad4(data)
+        views.append({
+            "buffer": 0,
+            "byteOffset": cursor,
+            "byteLength": len(data),
+            "target": target,
+        })
+        blobs.append(padded)
+        cursor += len(padded)
+        return len(views) - 1
+
+    materials: list[dict] = []
+    primitives: list[dict] = []
+    accessors: list[dict] = []
+    total_vertices = 0
+    total_tris = 0
+
+    for mat_name in sorted(builders):
+        mesh = builders[mat_name]
+        if mesh.vertex_count == 0 or not mesh.indices:
+            continue
+        pos = mesh.positions.tobytes()
+        nrm = mesh.normals.tobytes()
+        col = mesh.colors.tobytes()
+        uv = mesh.uvs.tobytes()
+        idx = mesh.indices.tobytes()
+
+        v_pos = add_blob(pos, 34962)
+        v_nrm = add_blob(nrm, 34962)
+        v_col = add_blob(col, 34962)
+        v_uv = add_blob(uv, 34962)
+        v_idx = add_blob(idx, 34963)
+
+        base = len(accessors)
+        accessors.extend([
+            {
+                "bufferView": v_pos, "componentType": 5126,
+                "count": mesh.vertex_count, "type": "VEC3",
+                "min": mesh.min, "max": mesh.max,
+            },
+            {"bufferView": v_nrm, "componentType": 5126,
+             "count": mesh.vertex_count, "type": "VEC3"},
+            {"bufferView": v_col, "componentType": 5126,
+             "count": mesh.vertex_count, "type": "VEC3"},
+            {"bufferView": v_uv, "componentType": 5126,
+             "count": mesh.vertex_count, "type": "VEC2"},
+            {"bufferView": v_idx, "componentType": 5125,
+             "count": len(mesh.indices), "type": "SCALAR"},
+        ])
+
+        materials.append({
+            "name": mat_name,
+            "doubleSided": True,
+            "pbrMetallicRoughness": {
+                "baseColorFactor": [1.0, 1.0, 1.0, 1.0],
+                "metallicFactor": 0.0,
+                "roughnessFactor": 0.92,
+            },
+            "extras": {"texdata": mat_name},
+        })
+        primitives.append({
+            "attributes": {
+                "POSITION": base,
+                "NORMAL": base + 1,
+                "COLOR_0": base + 2,
+                "TEXCOORD_0": base + 3,
+            },
+            "indices": base + 4,
+            "material": len(materials) - 1,
+            "mode": 4,
+        })
+        total_vertices += mesh.vertex_count
+        total_tris += len(mesh.indices) // 3
+
+    bin_blob = pad4(b"".join(blobs))
     gltf = {
         "asset": {"version": "2.0", "generator": "tf2-demo bsp2glb.py"},
         "scene": 0,
         "scenes": [{"nodes": [0]}],
-        "nodes": [{"mesh": 0, "name": "pl_upward"}],
-        "meshes": [{
-            "name": "pl_upward",
-            "primitives": [{
-                "attributes": {"POSITION": 0, "NORMAL": 1, "COLOR_0": 2},
-                "indices": 3,
-                "mode": 4,
-            }],
-        }],
-        "buffers": [{"byteLength": total_bin}],
-        "bufferViews": [
-            {"buffer": 0, "byteOffset": offsets[0], "byteLength": len(pos), "target": 34962},
-            {"buffer": 0, "byteOffset": offsets[1], "byteLength": len(nrm), "target": 34962},
-            {"buffer": 0, "byteOffset": offsets[2], "byteLength": len(col), "target": 34962},
-            {"buffer": 0, "byteOffset": offsets[3], "byteLength": len(idx), "target": 34963},
-        ],
-        "accessors": [
-            {
-                "bufferView": 0, "componentType": 5126, "count": vertex_count,
-                "type": "VEC3", "min": mesh.min, "max": mesh.max,
-            },
-            {"bufferView": 1, "componentType": 5126, "count": vertex_count, "type": "VEC3"},
-            {"bufferView": 2, "componentType": 5126, "count": vertex_count, "type": "VEC3"},
-            {"bufferView": 3, "componentType": 5125, "count": index_count, "type": "SCALAR"},
-        ],
+        "nodes": [{"mesh": 0, "name": name}],
+        "meshes": [{"name": name, "primitives": primitives}],
+        "materials": materials,
+        "buffers": [{"byteLength": len(bin_blob)}],
+        "bufferViews": views,
+        "accessors": accessors,
     }
 
     json_blob = pad4(json.dumps(gltf, separators=(",", ":")).encode("utf-8"), b" ")
-    bin_blob = pad4(b"".join(chunks))
     total = 12 + 8 + len(json_blob) + 8 + len(bin_blob)
 
     os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
@@ -627,9 +725,11 @@ def write_glb(path: str, mesh: MeshBuilder) -> None:
         f.write(struct.pack("<II", len(bin_blob), 0x004E4942))
         f.write(bin_blob)
 
-    print(f"wrote {path}: {vertex_count} vertices, {index_count // 3} triangles, "
-          f"{total / (1024 * 1024):.2f} MiB", file=sys.stderr)
-    print(f"bbox min={mesh.min} max={mesh.max}", file=sys.stderr)
+    gmin = [min(m.min[i] for m in builders.values() if m.vertex_count) for i in range(3)]
+    gmax = [max(m.max[i] for m in builders.values() if m.vertex_count) for i in range(3)]
+    print(f"wrote {path}: {total_vertices} vertices, {total_tris} triangles, "
+          f"{len(primitives)} materials, {total / (1024 * 1024):.2f} MiB", file=sys.stderr)
+    print(f"bbox min={gmin} max={gmax}", file=sys.stderr)
 
 
 def main(argv) -> int:
@@ -638,11 +738,11 @@ def main(argv) -> int:
         return 2
     bsp = Bsp(argv[1])
     print(f"{argv[1]}: VBSP v{bsp.version}", file=sys.stderr)
-    mesh = build(bsp)
-    if mesh.vertex_count == 0 or not mesh.indices:
+    builders = build(bsp)
+    if not builders or not any(m.indices for m in builders.values()):
         print("error: no renderable geometry", file=sys.stderr)
         return 1
-    write_glb(argv[2], mesh)
+    write_glb(argv[2], builders)
     return 0
 
 
