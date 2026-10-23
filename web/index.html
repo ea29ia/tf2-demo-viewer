@@ -62,6 +62,12 @@
             <button class="mode-btn" data-mode="follow">Follow</button>
             <button class="mode-btn" data-mode="pov">POV</button>
           </div>
+          <div class="demo-row">
+            <label id="demoFileBtn" class="pill-btn demo-btn" for="demoFile">
+              <span data-i18n="openDemoBtn">Открыть .dem…</span>
+            </label>
+            <input id="demoFile" type="file" accept=".dem" hidden />
+          </div>
           <div id="aliveStats" class="alive-stats">
             <span class="alive-stat red"><b id="aliveRed">0</b>&nbsp;<span data-i18n="statRedWord">красных</span></span>
             <span class="alive-stat blue"><b id="aliveBlue">0</b>&nbsp;<span data-i18n="statBlueWord">синих</span></span>

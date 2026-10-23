@@ -31,9 +31,11 @@ import {
   dismissBtn,
   loadDot,
   propBoxesInput,
+  demoFileInput,
+  demoFileBtn,
 } from './dom';
 import { clamp, fmtTime, TEAM_RED, TEAM_BLUE } from './tf2';
-import { state, MAP_URL, REPLAY_URL, type CameraMode } from './state';
+import { state, BASE, MAP_URL, REPLAY_URL, type CameraMode } from './state';
 import { scene, camera, sun, fill, hemi, fallbackGrid, renderer } from './scene';
 import { resetFreeCamera, updateCamera } from './camera';
 import { views, createPlayerView, viewFor, applyPose, hideAllViews } from './playerViews';
@@ -577,6 +579,81 @@ async function loadReplay(): Promise<void> {
   setupReplay(replay);
 }
 
+/**
+ * Open a user-selected .dem file: upload it to the dev-server helper
+ * (POST /__dump_demo, see web/vite.config.ts), which runs the local Rust
+ * dumper and returns a self-contained replay.bin. Only pl_upward is
+ * accepted (the map GLB is hardcoded to upward). On success the previous
+ * session is discarded and the new replay takes over playback.
+ */
+async function loadDemoFile(file: File): Promise<void> {
+  setPlaying(false);
+  demoFileBtn.classList.add('busy');
+  // The data-i18n span keeps the original label; applyLang() restores it.
+  const label = demoFileBtn.querySelector('span');
+  if (label) label.textContent = t('openDemoBusy');
+  try {
+    const response = await fetch(`${BASE}__dump_demo`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/octet-stream' },
+      body: await file.arrayBuffer(),
+    });
+    if (!response.ok) {
+      let msg = `HTTP ${response.status}`;
+      let map = '';
+      try {
+        const data = (await response.json()) as { error?: string; map?: string };
+        if (data.error) msg = data.error;
+        if (data.map) map = data.map;
+      } catch {
+        // Non-JSON error body: fall back to the HTTP status text.
+      }
+      throw new Error(map ? t('errOnlyUpward', { map }) : t('errDemoDump', { msg }));
+    }
+    const buffer = await response.arrayBuffer();
+    const replay = parseReplay(buffer);
+    const map = (replay.meta.map ?? '').toLowerCase();
+    if (!map.includes('pl_upward')) {
+      throw new Error(t('errOnlyUpward', { map: replay.meta.map ?? '?' }));
+    }
+
+    // Reset the previous session: player views (groups, materials, label
+    // textures), selection, camera mode. The map GLB stays loaded — the
+    // feature is pl_upward-only, so the map does not change.
+    setPlaying(false);
+    hideAllViews();
+    for (const view of views.values()) {
+      view.group.traverse((obj) => {
+        const mesh = obj as THREE.Mesh;
+        if (mesh.isMesh) {
+          mesh.geometry.dispose();
+          const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+          for (const mat of mats) mat?.dispose();
+        }
+      });
+      view.group.removeFromParent();
+      view.label.texture.dispose();
+    }
+    views.clear();
+    state.selectedEntity = null;
+    state.cameraMode = 'free';
+
+    setupReplay(replay);
+    updateModeButtons();
+    resetFreeCamera();
+    updateHud();
+    setLoadState('ok');
+    hideOverlay();
+  } catch (err) {
+    setLoadState('err');
+    showOverlay([t('errDemo', { msg: (err as Error).message })]);
+  } finally {
+    demoFileBtn.classList.remove('busy');
+    applyLang(); // restore the button label
+    demoFileInput.value = ''; // allow re-picking the same file
+  }
+}
+
 export async function boot(): Promise<void> {
   applyLang(); // sets initial language on static DOM before anything renders
   resetFreeCamera();
@@ -688,6 +765,11 @@ propBoxesInput.addEventListener('change', () => {
 
 reloadBtn.addEventListener('click', () => window.location.reload());
 dismissBtn.addEventListener('click', () => hideOverlay());
+
+demoFileInput.addEventListener('change', () => {
+  const file = demoFileInput.files?.[0];
+  if (file) void loadDemoFile(file);
+});
 
 // ---------------------------------------------------------------------------
 // Animation loop

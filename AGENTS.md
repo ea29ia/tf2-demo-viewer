@@ -21,6 +21,8 @@ viewer/
     get_map.sh       downloads maps from public fastdl mirrors
     validate_glb.py  GLB sanity check (tri count, bbox) — must PASS
   web/               Vite + TypeScript + three.js viewer
+    vite.config.ts   dev/preview middleware: POST /__dump_demo (.dem ->
+                     dem2replay -> replay.bin; pl_upward gate; dev-only)
     src/main.ts      scene, cameras, playback, FX
     src/replay.ts    replay.bin parser (the ONLY place that knows the binary layout)
     src/playerModels.ts  player glb loading (DRACO), per-instance material clones

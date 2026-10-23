@@ -210,6 +210,17 @@ html, body, #app {
 .ghost-btn { background: transparent; color: var(--muted); }
 
 .mode-row { display: flex; gap: 6px; margin-top: 9px; }
+
+/* Open-demo row: a full-width file-picker button under the camera modes. */
+.demo-row { display: flex; margin-top: 9px; }
+.demo-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11px;
+}
+.demo-btn.busy { opacity: 0.6; pointer-events: none; }
 .mode-btn {
   flex: 1;
   height: 28px;

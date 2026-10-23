@@ -530,3 +530,33 @@ Fixed by re-running the full chain with
 `web/public/models/props/manifest.json`: all 1182 boxes omitted again, GLB =
 world + kits only (18.32 MiB, 44830 tris, validate PASS). AGENTS.md and the
 STATUS validation recipe now carry the manifest arg explicitly.
+
+## Session update — 2026-10-23 (night): open-.dem-from-browser (dev-only, pl_upward)
+
+User request: pick a .dem file in the UI; upward-only for now. The browser
+cannot parse .dem (WASM parser is parked in TODO.txt), so the implementation
+is a dev-server helper:
+
+- `web/vite.config.ts` (NEW): `POST /__dump_demo` middleware (dev AND
+  preview servers). Body = raw .dem (cap 1 GiB), written to a mkdtemp dir,
+  run through `preprocess/target/release/dem2replay`, meta.json checked for
+  `map == pl_upward` (else HTTP 415 with the map name), replay.bin returned
+  as application/octet-stream. Errors are JSON `{error, map?}`. The dumper
+  must exist (`cargo build --release`), else 503 with instructions.
+- `web/index.html`: "Открыть .dem…" pill button + hidden file input in the
+  playback card. `dom.ts` exports demoFileInput/demoFileBtn.
+- `web/src/viewer/playback.ts`: `loadDemoFile()` — POSTs the file, parses
+  the returned replay.bin (map gated client-side too), then fully resets the
+  previous session: setPlaying(false), hideAllViews(), dispose+remove every
+  PlayerView group/material/label texture, views.clear(), selection null,
+  camera mode free — then setupReplay() + resetFreeCamera. Button shows
+  "Обработка…" while busy; the label is restored via applyLang().
+- i18n keys: errDemo/errDemoDump/errOnlyUpward/openDemoBtn/openDemoBusy (RU+EN).
+- Verified: tsc --noEmit + npm run build exit 0; live curl of the middleware
+  with `soldier_upward.dem` (39 MB) → 43 MB replay.bin in ~4.8 s,
+  `validate.py` OK (map pl_upward, 60480 frames); swiftwater demo → HTTP 415
+  `unsupported map "pl_swiftwater_final1"`. USER eyeball pending: pick a
+  .dem in the sidebar while `npm run dev` runs.
+
+Scope note: production build serves static files only — the endpoint is not
+shipped; the WASM in-browser parser (TODO.txt) is the real fix later.
