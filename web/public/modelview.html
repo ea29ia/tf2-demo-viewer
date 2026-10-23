@@ -70,10 +70,6 @@ loader.loadAsync(`/models/players/${cls}_${team}.glb`).then(g => {
   model.traverse(o => {
     if (o.isMesh) {
       meshes.push(o);
-      const m = Array.isArray(o.material) ? o.material : [o.material];
-      for (const mm of m) {
-        if (mm.map) console.log(`[dbg] ${o.name} mat=${mm.name} flipY=${mm.map.flipY} ${mm.map.image?.width}x${mm.map.image?.height} src=${mm.map.source.data?.constructor?.name}`);
-      }
     }
   });
   const box = new THREE.Box3().setFromObject(model);

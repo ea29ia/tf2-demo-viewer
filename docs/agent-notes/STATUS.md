@@ -318,3 +318,9 @@ and "all 234 prop models, gradually".
 - **Not done yet / next**: chessboard UV density check; embed resolved textures
   into the GLB (size policy: no hard limit per user; suggested top-20@512 /
   rest@256 then measure); lightmap atlas; prop InstancedMesh wiring in web.
+
+## Session update — 2026-10-23 (later): player textures CONFIRMED by user
+- User eyeballed modelview.html in Firefox: player textures are correct.
+  This closes the pending verification from the texture-fix session; the
+  [dbg] console.log line was removed from web/public/modelview.html in the
+  same commit. No further texture-pipeline work is blocked.
