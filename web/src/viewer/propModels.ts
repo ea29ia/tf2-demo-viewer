@@ -40,9 +40,9 @@ interface PropExtrasEntry {
   /** Full model id, e.g. "models/props_coalmines/boulder_pile2". */
   m?: string;
   /**
-   * Baked per-prop tint (nearest lightmapped face average light) in
-   * display-referred sRGB. Used as the instance colour of the real mesh so it
-   * matches the baked world lighting. Absent on older extras => white.
+   * Baked per-prop tint (older tool builds wrote it). No longer read: the
+   * world is lit by scene lights again, so props use their own materials.
+   * Kept in the interface only to document the extras format.
    */
   c?: number[];
   /**
@@ -67,8 +67,6 @@ interface PlacedProp {
   origin: [number, number, number];
   angles: [number, number, number];
   scale: number;
-  /** Baked tint in display-referred sRGB (white when the extras lack `c`). */
-  tint: [number, number, number];
   /** True when the GLB extras carry `f: true` (hideable foliage prop). */
   foliage: boolean;
 }
@@ -80,9 +78,6 @@ const EXPORT_TO_SOURCE = new THREE.Matrix4().set(
   1, 0, 0, 0,
   0, 0, 0, 1,
 );
-
-/** Untinted instance color for translucent (BLEND) prop materials. */
-const WHITE_INSTANCE_TINT = new THREE.Color(1, 1, 1);
 
 function isVec3(value: unknown): value is number[] {
   return (
@@ -138,20 +133,11 @@ export function collectPlacedProps(root: THREE.Object3D): PlacedProp[] {
       if (!isVec3(e.o) || !isVec3(e.a)) continue;
       const k = Number(e.k);
       if (!Number.isFinite(k) || k <= 0) continue;
-      // Baked tint is optional (older extras); white leaves the model as-is.
-      const tint: [number, number, number] = isVec3(e.c)
-        ? [
-            THREE.MathUtils.clamp(Number(e.c[0]), 0, 1),
-            THREE.MathUtils.clamp(Number(e.c[1]), 0, 1),
-            THREE.MathUtils.clamp(Number(e.c[2]), 0, 1),
-          ]
-        : [1, 1, 1];
       placed.push({
         model: e.m.replace(/\\/g, '/').replace(/\.mdl$/i, ''),
         origin: [Number(e.o[0]), Number(e.o[1]), Number(e.o[2])],
         angles: [Number(e.a[0]), Number(e.a[1]), Number(e.a[2])],
         scale: k,
-        tint,
         // Backward compatibility: extras from older exporters have no flag.
         foliage: e.f === true,
       });
@@ -161,61 +147,9 @@ export function collectPlacedProps(root: THREE.Object3D): PlacedProp[] {
 }
 
 /**
- * GLTFLoader marks glTF alphaMode BLEND as `transparent = true`. Those props
- * (light cones, glass) must not be dimmed by the baked tint.
- */
-function isBlendMaterial(material: THREE.Material): boolean {
-  return material.transparent === true;
-}
-
-/**
- * Build an unlit material for a prop mesh. The world is drawn unlit with a
- * baked lightmap, so props must ignore the scene's hemisphere/fill lights too;
- * the baked tint arrives per instance through InstancedMesh.instanceColor.
- */
-function toUnlitMaterial(source: THREE.Material): THREE.MeshBasicMaterial {
-  const src = source as THREE.MeshStandardMaterial;
-  const material = new THREE.MeshBasicMaterial({
-    map: src.map ?? null,
-    color: src.color ? src.color.clone() : new THREE.Color(1, 1, 1),
-    side: src.side,
-    fog: src.fog,
-    alphaTest: src.alphaTest,
-    transparent: src.transparent,
-    opacity: src.opacity,
-    premultipliedAlpha: src.premultipliedAlpha,
-    depthWrite: src.depthWrite,
-  });
-  material.name = src.name;
-
-  // three r186's color_fragment.glsl only multiplies diffuseColor by vColor
-  // under USE_COLOR/USE_COLOR_ALPHA; USE_INSTANCING_COLOR alone can therefore
-  // leave the fragment output untinted. Inject the multiply when the chunk did
-  // not already do it (the guard keeps it from doubling the tint on versions
-  // where instancing colors also define USE_COLOR).
-  material.onBeforeCompile = (shader) => {
-    shader.fragmentShader = shader.fragmentShader.replace(
-      '#include <color_fragment>',
-      `#include <color_fragment>
-#if defined( USE_INSTANCING_COLOR ) && !defined( USE_COLOR ) && !defined( USE_COLOR_ALPHA )
-	diffuseColor.rgb *= vColor.rgb;
-#endif`,
-    );
-  };
-  // Keep this injected program separate from other MeshBasicMaterials.
-  material.customProgramCacheKey = () => 'prop-baked-unlit';
-  return material;
-}
-
-/** Display-referred sRGB tint -> renderer working (linear) color. */
-function tintToLinear(tint: [number, number, number]): THREE.Color {
-  return new THREE.Color().setRGB(tint[0], tint[1], tint[2], THREE.SRGBColorSpace);
-}
-
-/**
  * Load the prop model manifest and instance every placed prop whose model is
  * listed there. Never throws: a missing/broken manifest or individual model
- * leaves the baked box geometry in place.
+ * leaves the box geometry in place.
  *
  * @param root       rotated map scene root; instanced meshes are added here.
  * @param extrasRoot object tree that carries the prop extras (usually the same
@@ -296,22 +230,18 @@ export async function loadPropModels(
       gltf.scene.updateMatrixWorld(true);
       const parts: {
         geometry: THREE.BufferGeometry;
-        material: THREE.MeshBasicMaterial;
+        material: THREE.Material;
         matrix: THREE.Matrix4;
-        /** False for BLEND parts, which use a white instance tint. */
-        baked: boolean;
       }[] = [];
       gltf.scene.traverse((obj) => {
         if (!(obj instanceof THREE.Mesh) || obj instanceof THREE.SkinnedMesh) return;
         // Preserve any node transform authored inside the prop GLB.
         const matrix = obj.matrixWorld.clone();
+        // The loaded material is used as-is: lit MeshStandard (or unlit for
+        // KHR_materials_unlit parts), sharing one instance across all
+        // InstancedMeshes built from the same GLB.
         const build = (source: THREE.Material, geometry: THREE.BufferGeometry) => {
-          parts.push({
-            geometry,
-            material: toUnlitMaterial(source),
-            matrix,
-            baked: !isBlendMaterial(source),
-          });
+          parts.push({ geometry, material: source, matrix });
         };
         const materials = Array.isArray(obj.material)
           ? obj.material
@@ -322,8 +252,8 @@ export async function loadPropModels(
           return;
         }
         // A multi-primitive glTF mesh becomes one geometry plus material
-        // groups. Split it so each InstancedMesh has a single material and can
-        // pick its own instance tint (BLEND white, opaque/MASK baked).
+        // groups. Split it so each InstancedMesh has a single material (an
+        // InstancedMesh cannot take a material array).
         for (const group of groups) {
           const source = materials[group.materialIndex ?? 0] ?? materials[0];
           if (!source) continue;
@@ -344,7 +274,6 @@ export async function loadPropModels(
       const matrices = list.map((prop) =>
         buildInstanceMatrix(prop.origin, prop.angles, prop.scale),
       );
-      const bakedColors = list.map((prop) => tintToLinear(prop.tint));
 
       for (const part of parts) {
         const mesh = new THREE.InstancedMesh(
@@ -362,11 +291,8 @@ export async function loadPropModels(
         for (let i = 0; i < matrices.length; i++) {
           matrix.copy(matrices[i]).multiply(part.matrix);
           mesh.setMatrixAt(i, matrix);
-          // Per-instance baked light; BLEND props stay untinted (white).
-          mesh.setColorAt(i, part.baked ? bakedColors[i] : WHITE_INSTANCE_TINT);
         }
         mesh.instanceMatrix.needsUpdate = true;
-        if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
         mesh.computeBoundingSphere();
         root.add(mesh);
         if (foliage) addedFoliage.push(mesh);

@@ -8,6 +8,13 @@ tf2_textures -> loose tree), decodes mip 0, downscales, and embeds the PNG
 into the GLB: images/textures/samplers appended, PNG bytes appended to the
 BIN chunk. Existing geometry, bufferViews and accessors are untouched.
 
+$detail travels in material.extras.sourceDetail (textureIndex/scale/
+blendMode/blendFactor) AND, for non-WVT materials, in the emissive slot
+(emissiveTexture + black emissiveFactor): a bare textureIndex in extras is
+not resolvable by GLTFLoader, so the emissive transport is how the PNG
+reaches the viewer. $bumpmap maps to normalTexture and all three can be
+present on one material at once.
+
 Size policy (user decision: no hard limits; measured defaults):
 - the N materials with the largest painted area get 512x512,
 - the rest get 256x256.
@@ -311,15 +318,10 @@ def main(argv) -> int:
     blend_count = 0
     wvt_count = 0
     bump_count = 0
+    detail_count = 0
     kept_color_count = 0
     no_texture: list[str] = []
     mutable_bin = bytearray(bin_blob)
-    # TODO: `$detail` / `$detailscale` / `$detailblendmode` (and
-    # `$detailblendfactor`) are NOT implemented. Source blends a third,
-    # world-space UV texture over the base at low opacity (grass/dirt
-    # breakup, rust). glTF has no second-UV-scale slot in the core material
-    # model, so this needs either a custom shader extension or a pre-baked
-    # atlas; until then detail materials render with the base texture only.
     for mat_index in sorted(texdata_of):
         mat = materials[mat_index]
         paths = texture_paths.get(mat_index) or []
@@ -375,15 +377,58 @@ def main(argv) -> int:
         # $bumpmap -> normalTexture. Source normal maps are usually DXT5
         # (X in alpha, Y in green, X/Y optionally signed) or BGR888; the
         # existing VTF decoder covers those, and anything it cannot decode
-        # only loses this material's normal map.
+        # only loses this material's normal map. $bumptransform/$bumpscale
+        # UV mapping (rare) travels in extras.sourceBumpmapUV; no pl_upward
+        # material uses them (verified across all 72 VMTs).
         bump = resolved.get("$bumpmap")
         bump_path = vmt.normalize_texture_path(bump) if isinstance(bump, str) else ""
         if bump_path:
             bump_index = embed(bump_path, size, "normal map $bumpmap")
             if bump_index is not None:
                 mat["normalTexture"] = {"index": bump_index, "texCoord": 0}
-                mat.setdefault("extras", {})["sourceBumpmap"] = True
+                extras = mat.setdefault("extras", {})
+                extras["sourceBumpmap"] = True
+                bump_uv = vmt.get_bump_uv_transform(resolved)
+                if bump_uv:
+                    extras["sourceBumpmapUV"] = bump_uv
                 bump_count += 1
+        # $detail -> extras.sourceDetail + emissiveTexture transport. The
+        # detail textureIndex in extras alone is NOT resolvable by GLTFLoader
+        # (it only creates textures for known material slots), so the PNG is
+        # ALSO wired into the emissive slot — emissiveFactor stays black, so
+        # a spec-compliant renderer shows nothing extra, and the viewer reads
+        # emissiveTexture as the detail map (same transport trick as the WVT
+        # blend, see extras.sourceBlend). normalTexture is owned by $bumpmap,
+        # so the detail never collides with it. Blend modes (see
+        # vmt.get_detail): 0 MODULATE = detail * base * 2, 1 ADD, 2 TRANSFORM
+        # (basescale), 6+ unlit/fancy. The viewer only needs mode 0 today;
+        # pl_upward uses mode 0 exclusively (histogram checked across the 72
+        # texdata VMTs), the other modes are transported for completeness.
+        detail = vmt.get_detail(resolved)
+        if detail:
+            detail_index = embed(detail["texture"], size, "$detail")
+            if detail_index is not None:
+                mat.setdefault("extras", {})["sourceDetail"] = {
+                    "textureIndex": detail_index,
+                    "scale": detail["scale"],          # float or [u, v]
+                    "blendMode": detail["blendMode"],  # 0 = MODULATE
+                    "blendFactor": detail["blendFactor"],
+                }
+                # One emissive slot, two potential passengers: the WVT blend
+                # texture (wired above) and the detail texture. If a future
+                # material were BOTH WVT and $detail, keep the WVT transport
+                # (it wins the slot) and leave the detail as an unresolvable
+                # extras record rather than overloading the slot.
+                if blend_index is not None:
+                    print(f"warning: material {texdata_of[mat_index]} is both "
+                          f"WVT and $detail; emissive slot keeps the WVT "
+                          f"blend texture, detail is not transportable",
+                          file=sys.stderr)
+                else:
+                    mat["emissiveTexture"] = {"index": detail_index,
+                                              "texCoord": 0}
+                    mat["emissiveFactor"] = [0.0, 0.0, 0.0]
+                detail_count += 1
         # glTF multiplies COLOR_0 into the base color; the palette vertex
         # colors were the pre-texture stand-in and would darken/tint the real
         # texture. Neutralise them (in place — offsets stay valid) once the
@@ -429,6 +474,10 @@ def main(argv) -> int:
     print(f"worldvertextransition: {wvt_count} materials with blend texture "
           f"(transport: emissiveTexture, weight: COLOR_0.r)", file=sys.stderr)
     print(f"normal maps attached: {bump_count}", file=sys.stderr)
+    print(f"detail maps attached: {detail_count} (transport: "
+          f"emissiveTexture + extras.sourceDetail "
+          f"-> textureIndex/scale/blendMode/blendFactor)",
+          file=sys.stderr)
     print(f"COLOR_0 kept (WVT/$vertexcolor/$vertexalpha): {kept_color_count}",
           file=sys.stderr)
     if no_texture:

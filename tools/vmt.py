@@ -278,6 +278,95 @@ def get_texture_paths(mat: dict) -> list[str]:
     return out
 
 
+def get_detail(mat: dict) -> dict | None:
+    """Parse the `$detail` stage into a plain dict (None when absent/invalid).
+
+    Source blends a small tiling texture over the base albedo for breakup
+    (grass/dirt/rust). Blend modes (SDK `DetailBlendMode_t`):
+
+        0 MODULATE   detail * base * 2 (the common "soft overlay")
+        1 ADD        base + detail * factor
+        2 TRANSFORM  detail filtered through a base-texture-derived mask
+                     (`$detailtexturetransform` / basescale)
+        6+           unlit/fancy modes (decals, "fademask", ...)
+
+    Only mode 0 is currently consumed by the web viewer; pl_upward uses
+    mode 0 exclusively (verified: 16/16 materials in the 72-material set).
+    The JSON fields below are emitted for all modes so the viewer can
+    implement the rest without re-dumping the BSP.
+
+    Returns {"texture": path, "scale": float | [u, v],
+             "blendMode": int, "blendFactor": float} or None.
+    """
+    texture = mat.get("$detail")
+    if not isinstance(texture, str):
+        return None
+    texture = normalize_texture_path(texture)
+    if not texture:
+        return None
+
+    def _floats(value, count_default):
+        """Parse '1.5' or '[1.1 2.3]' into float(s); None when malformed."""
+        if not isinstance(value, str):
+            return None
+        s = value.strip().strip("[]()").strip()
+        if not s:
+            return None
+        parts = s.replace(",", " ").split()
+        try:
+            nums = [float(p) for p in parts]
+        except ValueError:
+            return None
+        if not nums:
+            return None
+        return nums if len(nums) > 1 else nums[0]
+
+    scale = _floats(mat.get("$detailscale"), 1)
+    # $detailscale accepts 1..4 floats; 2+ means per-axis (u, v) tiling.
+    if isinstance(scale, list):
+        scale = scale[:2]
+    elif not isinstance(scale, float):
+        scale = 1.0
+
+    mode_raw = _floats(mat.get("$detailblendmode"), 0)
+    blend_mode = int(mode_raw) if isinstance(mode_raw, float) else 0
+
+    factor = _floats(mat.get("$detailblendfactor"), 1)
+    if not isinstance(factor, float):
+        factor = 1.0
+
+    return {
+        "texture": texture,
+        "scale": scale,
+        "blendMode": blend_mode,
+        "blendFactor": factor,
+    }
+
+
+def get_bump_uv_transform(mat: dict) -> dict | None:
+    """`$bumpscale` / `$bumptransform` UV mapping info (None when absent).
+
+    `$bumpscale` multiplies the normal-map UVs; `$bumptransform` carries a
+    2x4 (or center/scale/rotate/translate) matrix as raw KeyValues text.
+    Values are stored verbatim-ish (floats / raw string) because the viewer
+    applies them only when present. No pl_upward material uses either
+    (verified), so this is future-proofing for other maps.
+    """
+    out: dict = {}
+    scale = mat.get("$bumpscale")
+    if isinstance(scale, str):
+        try:
+            s = float(scale.strip())
+        except ValueError:
+            s = None
+        if s is not None and s != 1.0:
+            out["scale"] = s
+    transform = mat.get("$bumptransform")
+    if isinstance(transform, str) and transform.strip():
+        out["transform"] = transform.strip()
+    return out or None
+
+
 def _flag(mat: dict, key: str, default: bool = False) -> bool:
     value = mat.get(key)
     if not isinstance(value, str):

@@ -19,6 +19,18 @@ https://github.com/ea29ia/tf2-demo-viewer (public).
 
 ## Working (verified 2026-10-21 with the exact commands below)
 
+- **Lighting rework per user request (2026-10-23, later)**: baked light is OFF
+  (`LIGHTMAP_INTENSITY = 0.0`, plumbing kept as a knob); the world is shaded by
+  MeshStandardMaterial + sun/fill/hemi (2.6/0.85/2.1) with real shadows, and
+  glTF `normalTexture` now maps to a real normalMap (21 materials). `$detail`
+  is embedded and transported through the emissive slot + `extras.sourceDetail`
+  (16 materials, all blendMode 0 MODULATE) and applied in the viewer via an
+  onBeforeCompile modulate injection; WVT keeps its own emissive transport.
+  The baked prop tint/instanceColor was removed (the previous blue cast came
+  from scene lights, the white look from its removal — user is reviewing).
+  Verified: full chain + `validate_glb.py` PASS (44830 tris, 21.8 MiB),
+  `tsc --noEmit`/`npm run build` exit 0. HUMAN visual review in progress.
+
 - **Prop meshes use baked light (2026-10-23)**: the instanced prop models were
   lit by the scene's blue hemisphere/fill while the world is baked unlit, so
   props looked blue. `add_props_glb.py` now stores the baked nearest-face tint

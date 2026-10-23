@@ -212,3 +212,13 @@ defined, so a guarded `diffuseColor.rgb *= vColor.rgb` injection is added.
 BLEND props (light cones) keep a white tint. Rejected: neutralizing the global
 hemisphere light (would change players/kits) and keeping the sun on props
 (inconsistent with the baked world, and the source of the complaint).
+
+## 2026-10-23: baked light off, standard shading on; detail transport
+User decision: the baked lightmap made dark patches and the unlit path hid
+normal/detail shading, so the world returns to MeshStandardMaterial lit by the
+sun with shadows; LIGHTMAP_INTENSITY=0 keeps the atlas attachable as a tuning
+knob. Detail maps need a real THREE texture, which GLTFLoader only creates for
+known material slots, so the detail PNG travels in emissiveTexture (black
+emissiveFactor) exactly like the WVT blend texture; a guard refuses the slot
+if a material ever had both transports. Viewer applies Source MODULATE-2x
+(`base * detail * 2`, blendFactor-lerped) sampling vMapUv * $detailscale.
