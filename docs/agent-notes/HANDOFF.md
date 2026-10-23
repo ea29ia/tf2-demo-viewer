@@ -1,98 +1,119 @@
-# Handoff — session of 2026-10-22 (x86_64 desktop)
+# Handoff — session of 2026-10-22/23 (x86_64 desktop → phone development)
 
-Read `../AGENTS.md` first, then `STATUS.md`, then this file. Everything below
-was verified with real commands; nothing is "should work".
+Read `../AGENTS.md` first, then `STATUS.md`, then the tagged notes
+(`40-vpk-mdl-pipeline.md`, `decisions.md`). Everything below was verified
+with real commands unless marked otherwise.
 
-## Environment (IMPORTANT — changed from previous sessions)
+## Environment
 
-- This is now an **x86_64 Linux desktop** (not the aarch64/Termux box).
-  Node 24.22 (`~/.local/node`, symlinked into `~/.local/bin`) and Rust 1.99
-  (`~/.cargo`) were installed this session. Python 3.12 system-wide.
-- **TF2 is installed locally**: `~/.steam/debian-installation/steamapps/common/
-  Team Fortress 2`. This means full VPK access (models, textures), maps, and
-  demo recordings. The "blocked on VPK access" TODO items are now unblocked.
-- Demos available in `tf/`: `demp.dem`, `demp_2.dem` (pl_upward),
-  `pocket.dem`/`pocket1.dem` (pl_swiftwater_final1), `fix.dem` (pl_upward).
-- Dev server running in background: `cd web && npm run dev` →
-  http://127.0.0.1:5173.
-- `gh` CLI was not needed this session; `git push` over https worked fine.
+- x86_64 Linux desktop. Node 24 (`~/.local/node`), Rust 1.99 (`~/.cargo`),
+  Python 3.12 system-wide. Playwright-core installed in /tmp/opencode
+  (chromium-1248, firefox-1555 in ~/.cache/ms-playwright) — used for
+  headless visual checks (`/tmp/opencode/shot*.mjs` patterns).
+- TF2 installed locally: `~/.steam/debian-installation/steamapps/common/
+  Team Fortress 2/tf`. Offline subset for phone work: `~/Documents/tf2/`
+  (328 MB: tf/models, tf/materials, tf/models/player/*_animations.mdl,
+  demos/). `tools/vpk.py` `open_pack()` accepts the loose tree.
+- Dev server: `cd web && npx vite --host 0.0.0.0 --port 5173`
+  (user accesses via http://192.168.101.10:5173). May not be running.
+- Packed transfer archives: `/tmp/opencode/tf2_19.tar.zst` (128 MB,
+  zstd -19) and `/tmp/opencode/tf2.tar.zst` (150 MB, zstd -3).
 
-## What was done (chronological)
+## State of the player-model work (the main thread of this session)
 
-1. **Environment bootstrap**: installed Node + Rust, `npm install` in web/,
-   `cargo build --release` for preprocess — all clean.
-2. **Assets regenerated from local files** (no more fastdl):
-   - `demp.dem` → `web/public/replay/replay.bin` (95349 frames, 1434 s,
-     24 players, 487 kills, pl_upward, recorder LepeMot). `validate.py` → OK.
-   - local `pl_upward.bsp` → map GLB. `validate_glb.py` → PASS.
-3. **Bug fixed: 3D-skybox props leaked into the GLB** (bbox max x was 8898;
-   floating boxes far from the map). `tools/add_props_glb.py` now culls prop
-   origins against worldspawn `world_mins/maxs` intersected with the same sane
-   constants `bsp2glb.py` uses. 1242 → 1182 entries, bbox now
-   x[-3072, 4100.6]. Committed.
-4. **Bug fixed: click-inspect loaded 0 props** (user-reported, never root-caused
-   before). Cause: three.js GLTFLoader merges glTF `node.extras` into
-   `object.userData` via `Object.assign`, so the code must read
-   `userData.props`, not `userData.extras.props`. Fixed in
-   `web/src/viewer/inspect.ts`. Verified live in a browser tab: console shows
-   `[inspect] prop entries loaded: 1212`, synthetic clicks across the canvas
-   produced info cards (barrels, rails, fences, boulders, lights). Committed.
-5. **MAP_URL switched back** from cp_dustbowl to pl_upward
-   (`web/src/viewer/state.ts`), tsc + build clean. Committed together with #4.
-6. **All committed and pushed** as `845dadc fix(tools,web): cull 3D-skybox
-   props; fix click-inspect extras lookup`. Working tree clean except the new
-   uncommitted VPK/MDL tools (below) and `web/public/replay/meta.json`
-   (regenerated data, gitignored apart from meta — check .gitignore intent).
-
-## What was started but NOT finished (the current task)
-
-User chose the next task: **real meshes from VPK** (option 1 of 4). Work done
-so far — three new tools, all stdlib-only, uncommitted:
-
-- `tools/vpk.py` — VPK v1/v2 reader. WORKING (listed 104137 entries in
-  tf2_misc_dir, extracted scout.mdl/vvd/vtx correctly).
-- `tools/vtf.py` — VTF decoder (DXT1/DXT3/DXT5, BGR/BGRA/BGRX) + PNG writer.
-  WORKING (scout_red 2048x1024 and barrel01 512x512 decode to correct images).
-- `tools/mdl2glb.py` — MDL v48 + VVD + dx90 VTX → textured GLB, bind pose,
-  skin families 0/1 → red/blue outputs. WORKING for scout: 8261 LOD0 verts,
-  5120 triangles, correct team texture embedded (scout_red/scout_blue). Output
-  in `/tmp/opencode/tf2/glb/scout_{red,blue}.glb` (tmp — regenerate).
-
-**Remaining known gap**: eyeball meshes use the `EyeRefract` shader (no
-`$basetexture`); the `$Iris` fallback was just added and needs re-verification
-(eyes may still render without material).
-
-**Not yet done**: no visual verification in the browser (load
-`/tmp/opencode/tf2/glb/scout_red.glb` in `web/modeltest.html` or a scratch
-three.js page), no export of the other 8 classes, no replacement of the
-dribble.tf DRACO set in `web/public/models/players/`, no wiring changes in
-`playerModels.ts`.
-
-## Where the knowledge is
-
-- **`docs/agent-notes/40-vpk-mdl-pipeline.md`** — the full field-offset and
-  format gotcha list for VPK/VTF/MDL/VVD/VTX with verified numbers. READ THIS
-  before touching `mdl2glb.py`; every number there cost debugging time.
-- `STATUS.md` — updated with a session block (env change, fixes, validation).
-- `decisions.md` — two new appended decisions (userData.props, skybox culling).
-
-## Verify-before-done commands (this environment)
+All 9 classes × 2 teams are real VPK-derived GLBs in
+`web/public/models/players/` (gitignored? NO — they are committed; ~9 MB).
+Export command (works from the offline copy too):
 
 ```sh
-cd web && npx tsc --noEmit && npm run build          # web changed
-cd .. && python3 preprocess/validate.py web/public/replay/replay.bin \
-    web/public/replay/meta.json                      # replay changed
-python3 tools/validate_glb.py web/public/maps/pl_upward.glb  # map changed
-python3 tools/mdl2glb.py "$TF" models/player/scout /tmp/x/scout  # models
+python3 tools/mdl2glb.py ~/Documents/tf2/tf models/player/<cls> \
+    web/public/models/players/<cls>   # demoman dir: models/player/demo
 ```
 
-## Recommended next steps
+Three fixes landed this session, in causal order:
 
-1. Verify scout GLB visually (three.js scratch page or modeltest.html).
-2. Fix eyeball `$Iris` loading; re-export scout.
-3. Export all 9 classes × 2 teams into `web/public/models/players/`
-   (replacing dribble.tf set — also removes the DRACO CDN dependency and the
-   MvM robo-pyro), update `playerModels.ts` (new GLBs are not Draco).
-4. Then prop meshes (top models by instance count), then map textures.
-5. Commit `tools/vpk.py`, `tools/vtf.py`, `tools/mdl2glb.py` with a proper
-   message once the pipeline is verified end-to-end in the browser.
+1. **f03389e winding**: Source VTX strips are D3D CW; glTF needs CCW.
+   mdl2glb emits (a,c,b). Verified: geometric-vs-vertex normal agreement
+   3129/3139 on the medic head (was 10/3139). Without this every mesh
+   rendered inside-out (dark faces, "texture on the wrong body part").
+2. **71108fd TextureLoader path**: `window.createImageBitmap = undefined`
+   before GLTFLoader in `web/src/playerModels.ts` and `web/public/
+   modelview.html` — the ImageBitmapLoader path ignores texture.flipY at
+   upload and browsers disagree on bitmap orientation (Firefox mirroring).
+   tsc + vite build exit 0; dbg log confirms src=HTMLImageElement.
+3. **706c28b THE ROOT CAUSE — vtf.py mip order**: VTF stores the mip chain
+   smallest-first; mip 0 (full res) is the LAST mip_size bytes. We decoded
+   from the start → spatially SCRAMBLED textures for every material. This
+   is what produced "эмблема на бедре", "кожа на животе", "чёрное лицо" —
+   all of it. Decisive test: downscale decoded mip0 by 2 and compare to
+   decoded mip1 — mean|diff| 1.0 (correct order) vs 41.4 (old). After the
+   fix medic face verts sample skin at 59-70% (was 5%), avg (167,102,75).
+   All 18 GLBs regenerated (f3de42e).
+
+IMPORTANT CONTEXT: earlier UV-flip A/B conclusions (V-flip added in
+e23c5e3, reverted in de916fb) were computed against the CORRUPTED decoder
+output and must not be trusted as evidence. Current state: NO V flip,
+D3D top-left origin == glTF convention.
+
+## UNRESOLVED / awaiting user
+
+- **User has NOT yet visually confirmed the texture fix in Firefox.**
+  Ask him to hard-reload http://192.168.101.10:5173/modelview.html?cls=
+  medic&team=red. The `[dbg]` console.log line in modelview.html is still
+  committed — remove after confirmation.
+- The "F" (Flip V) button on modelview.html now serves as a diagnostic:
+  with correct data, pressing F should BREAK the texture; if it FIXES it,
+  something else is off.
+- Models face running direction: only math-verified, not eyeballed in motion.
+
+## Animation work (staged, not started in code)
+
+- `~/Documents/tf2/tf/models/player/<cls>_animations.mdl` copied for all
+  9 classes (user request; nothing parses them yet).
+- Recon findings (verified today, see STATUS 2026-10-23):
+  - TF2 player models are COMPOSITES: `<cls>.mdl` (geometry/materials) +
+    `<cls>_animations.mdl` (sequences), merged via $includemodel at load.
+    An exporter must read both.
+  - TF2 v48 header offsets DIFFER from SDK studio.h: numlocalseq is not at
+    offset 124; empirically for soldier.mdl numseq=20/seqindex at 204/208.
+    Verify per-field before trusting.
+  - mstudioseqdesc_t stride = 196 (Crowbar v48: 34 ints + 15 floats), NOT
+    the SDK's 212 (Crowbar omits bbmin/bbmax read but they are present...
+    treat 196 as hypothesis to re-verify against real data).
+  - Sequence names live in the _animations.mdl: ReloadStand_PRIMARY,
+    AttackStand_PRIMARY, layer_reload_standing_arms, PRIMARY_aimmatrix_idle
+    etc. Base mdl holds only ~20 local seqs (ragdoll, ragdollspawn,
+    user_ref, ACT_DIERAGDOLL...).
+  - Path not yet found: pointers from seqdesc to label strings did not
+    match any obvious offset convention in probing — resolve offsets
+    empirically (label strings at known abs offsets in soldier_animations:
+    'ragdoll'@1044250, 'user_ref'@1044273, 'ACT_DIERAGDOLL'@1044258).
+- Also present (not copied): `<cls>_user_animations.mdl` (taunts).
+
+## Consistency audit (this session)
+
+- Fixed contradiction in `40-vpk-mdl-pipeline.md`: it said "mip 0 is FIRST"
+  — that was the BUG, written while the decoder was wrong. Now matches
+  decisions.md (smallest-first, mip 0 last).
+- STATUS.md offline-copy size corrected 287 → 328 MB (animations added).
+- TODO.txt/README checked: no other contradictions found. TODO already
+  lists "player animations (m_nSequence)" as the residual item.
+
+## Verified commands (this session)
+
+- `npx tsc --noEmit` + `npm run build` → exit 0 (after 71108fd).
+- medic GLB from loose tree vs VPK: JSON identical, same byte size.
+- Headless chromium renders medic with skin-colored face post-fix
+  (bm_face3.png crop); Firefox headless could not create WebGL context
+  (software-GL prefs failed) — user's real Firefox check still pending.
+
+## Suggested next steps
+
+1. Get user's visual confirmation of the texture fix (blocking cleanup of
+   [dbg] and any further texture work).
+2. Animation pipeline: parse _animations.mdl (seqdesc stride 196, animdesc,
+   mstudioanim_t quarter/half quantized tracks), add bones + skinning +
+   glTF animations for idle/run/crouch; wire m_nSequence→anim selection in
+   the viewer (sequence/cycle are not yet in replay.bin — PLAN.md change
+   required per the hard rule before touching the binary format).
+3. Prop meshes via the same converter (top-20 models by instance count).
