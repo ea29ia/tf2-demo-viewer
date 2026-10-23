@@ -18,9 +18,17 @@ Source's baked static-prop lighting cheaply (props in tunnels/under overhangs
 are no longer lit like outdoor props).
 
 Click-to-inspect metadata (`extras.props`) is attached to the node whose
-mesh is 0 (the world node) and stays in Source coordinates (Z-up).
+mesh is 0 (the world node) and stays in Source coordinates (Z-up). Besides the
+short name / box centre / box size it carries the full model id, the sprp base
+origin, the sprp angles and the uniform scale so the viewer can instance a real
+prop mesh at the exact transform.
 
-Usage: python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
+An optional third argument points at a props manifest (a JSON object with a
+"models" map keyed by full model id). Props whose model has a real mesh are
+left out of the box meshes (the viewer draws the real mesh instead), but their
+extras entry is still written.
+
+Usage: python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb [manifest.json]
 """
 from __future__ import annotations
 
@@ -98,15 +106,48 @@ def size_for(name: str):
     return DEFAULT_SIZE
 
 
+def model_id_for(name: str) -> str:
+    """Full sprp model id: the name-table string without the .mdl suffix."""
+    if name.lower().endswith(".mdl"):
+        return name[:-4]
+    return name
+
+
+def load_mesh_models(path):
+    """Return the set of model ids that have a real mesh, or an empty set.
+
+    A missing / malformed manifest is not fatal: the tool then keeps emitting
+    every box (the pre-manifest behaviour) and says so on stderr.
+    """
+    if not path:
+        return set()
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            manifest = json.load(f)
+        models = manifest["models"]
+        if not isinstance(models, dict):
+            raise ValueError('"models" is not an object')
+        return {str(key) for key in models}
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        print(f"warning: {path}: unusable props manifest ({exc}); "
+              f"emitting boxes for all props", file=sys.stderr)
+        return set()
+
+
 # ---------------------------------------------------------------------------
 # Baked static-prop lighting (approximation)
 # ---------------------------------------------------------------------------
 # StaticPropLump_t (TF2, game lump version 10, 72-byte stride). Byte offsets
-# verified against assets/pl_upward.bsp: m_LightingOrigin at 44 and the
-# 32-bit flags field at 64 (byte 31 is padding, its bytes are garbage).
+# verified against assets/pl_upward.bsp: m_LightingOrigin at 44, the single
+# m_Flags byte at 31 (offset 64 is the DX level) and m_flUniformScale at 56.
 PROP_LIGHTING_ORIGIN_OFFSET = 44
-PROP_FLAGS_OFFSET = 64
+PROP_FLAGS_OFFSET = 31
+PROP_UNIFORM_SCALE_OFFSET = 56
 STATIC_PROP_USE_LIGHTING_ORIGIN = 0x2
+# A valid uniform scale is finite and positive; zero/garbage values (present in
+# older or authored-off entries) fall back to 1.0.
+SCALE_MIN = 0.01
+SCALE_MAX = 100.0
 
 # Coarse spatial grid for nearest-face queries. 256 Source units keeps each
 # shell small; the expanding-ring search stays exact.
@@ -448,10 +489,13 @@ def world_stats(gltf: dict):
 
 
 def main(argv) -> int:
-    if len(argv) != 3:
-        print(f"usage: {argv[0]} <input.bsp> <map.glb>", file=sys.stderr)
+    if len(argv) not in (3, 4):
+        print(f"usage: {argv[0]} <input.bsp> <map.glb> [props_manifest.json]",
+              file=sys.stderr)
         return 2
     bsp_path, glb_path = argv[1], argv[2]
+    manifest_path = argv[3] if len(argv) == 4 else None
+    mesh_models = load_mesh_models(manifest_path)
 
     bsp = probe.m.Bsp(bsp_path)
     data, _version = probe.decompress_sprp(bsp)
@@ -488,6 +532,8 @@ def main(argv) -> int:
 
     added = 0
     skipped = 0
+    mesh_skipped = 0
+    scale_fallback = 0
     f_added = 0
     tinted = 0
     untinted = 0
@@ -513,14 +559,26 @@ def main(argv) -> int:
             skipped += 1
             continue
         sx, sy, h = size_for(name)
+        # m_flUniformScale scales the model about its origin; apply it to the
+        # stand-in box dimensions as well so the overlay follows the real mesh.
+        uniform_scale = struct.unpack_from(
+            "<f", data, base + PROP_UNIFORM_SCALE_OFFSET)[0]
+        if not (math.isfinite(uniform_scale)
+                and SCALE_MIN <= uniform_scale <= SCALE_MAX):
+            uniform_scale = 1.0
+            scale_fallback += 1
+        sx *= uniform_scale
+        sy *= uniform_scale
+        h *= uniform_scale
+
         color = color_for(name)
         rot = rotation_matrix(pitch, yaw, roll)
 
         # Baked light position: an explicitly authored lighting origin (only
         # valid when the flag is set; otherwise the bytes are garbage), else
-        # the prop origin. Only 5 upward props set it.
+        # the prop origin.
         light_pos = (ox, oy, oz)
-        flags = struct.unpack_from("<I", data, base + PROP_FLAGS_OFFSET)[0]
+        flags = struct.unpack_from("<B", data, base + PROP_FLAGS_OFFSET)[0]
         if flags & STATIC_PROP_USE_LIGHTING_ORIGIN:
             lx, ly, lz = struct.unpack_from("<3f", data, base + PROP_LIGHTING_ORIGIN_OFFSET)
             if all(math.isfinite(v) for v in (lx, ly, lz)):
@@ -536,19 +594,30 @@ def main(argv) -> int:
         # COLOR_0 = palette colour * baked tint, both display-referred sRGB.
         lit_color = (color[0] * tint[0], color[1] * tint[1], color[2] * tint[2])
 
-        # Compact entry for the web click-to-inspect lookup. Name keeps the
-        # full path minus the models/props_mining/ prefix; p is the box center
-        # (Source coords, Z-up); s is the full size.
+        # Compact entry for the web click-to-inspect lookup and for instancing
+        # the real prop mesh. Name keeps the legacy short form; m is the full
+        # model id (no .mdl); p is the box centre (Source coords, Z-up); s is
+        # the full box size; o/a/k are the sprp origin, angles and scale.
         short = name
         for prefix in ("models/props_mining/", "models/"):
             if short.startswith(prefix):
                 short = short[len(prefix):]
                 break
+        model_id = model_id_for(name)
         prop_entries.append({
             "n": short,
             "p": [round(ox, 1), round(oy, 1), round(oz + h / 2.0, 1)],
             "s": [sx, sy, h],
+            "o": [ox, oy, oz],
+            "a": [pitch, yaw, roll],
+            "k": uniform_scale,
+            "m": model_id,
         })
+
+        # Models exported as real meshes are drawn by the viewer, not as boxes.
+        if model_id in mesh_models:
+            mesh_skipped += 1
+            continue
 
         if is_foliage(name):
             emit_box(f_positions, f_normals, f_colors, f_indices,
@@ -592,6 +661,10 @@ def main(argv) -> int:
 
     _wv, _wt = world_stats(gltf)
     print(f"props added: {added}, skipped: {skipped} (of {prop_count})", file=sys.stderr)
+    print(f"props with a real mesh (boxes omitted): {mesh_skipped}", file=sys.stderr)
+    if scale_fallback:
+        print(f"uniform scale out of range, fell back to 1.0: {scale_fallback}",
+              file=sys.stderr)
     print(f"foliage props: {f_added} (separate mesh)", file=sys.stderr)
     print(f"prop lighting: {tinted} props tinted from {len(face_lights)} "
           f"lightmapped faces, {untinted} without a nearby face (white), "

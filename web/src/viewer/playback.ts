@@ -41,6 +41,7 @@ import { posesAt } from './frameCache';
 import { applyProjectiles } from './projectiles';
 import { updateDamageFx } from './damageFx';
 import { collectPropEntries, buildPropBoxOverlay } from './inspect';
+import { loadPropModels } from './propModels';
 import {
   setPlaying,
   togglePlay,
@@ -475,6 +476,15 @@ async function loadMap(): Promise<void> {
   gltf.scene.updateMatrixWorld(true);
   state.mapBounds = new THREE.Box3().setFromObject(gltf.scene);
   fallbackGrid.visible = false;
+
+  // Real prop meshes: props whose model exists in the props manifest have no
+  // box geometry in the GLB, so load the exported GLBs and instance them.
+  // Fire-and-forget: a missing manifest/model just leaves the boxes in place.
+  void loadPropModels(gltf.scene, gltf.scene, (meshes) => {
+    state.mapMeshes.push(...meshes);
+    // The checkbox may have been toggled while the models were loading.
+    if (wireframeInput.checked) applyWireframe();
+  });
 
   const propCount = collectPropEntries(gltf.scene);
   console.log('[inspect] prop entries loaded:', propCount);

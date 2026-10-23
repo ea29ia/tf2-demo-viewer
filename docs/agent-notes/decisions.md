@@ -157,3 +157,23 @@ Prop lighting is an approximation: nearest lightmapped face's avg-light
 is set; no occlusion or normal weighting.
 Known gaps: $detail/$blendmodulatetexture, normal maps are stored but not
 shaded (MeshBasic has no normal slot), water/sky shaders, SURF_WARP shading.
+
+## 2026-10-23: real boulder meshes via per-model manifest
+21 boulder_* models of pl_upward are exported once with props2glb.py
+(`--match boulder`) into web/public/models/props/ (21 MiB, textures embedded,
+no DRACO) plus `manifest.json` mapping full model id -> basename. The map GLB
+keeps a compact extras entry for every prop and additionally carries the
+instance transform (`o` base origin, `a` QAngle, `k` uniform scale, `m` model
+id); add_props_glb.py omits box geometry for models present in the manifest.
+The viewer instances each model as one InstancedMesh per primitive:
+M = T(o) * Rz(yaw)*Ry(pitch)*Rx(roll) * S(k) * C, C: (X,Y,Z)_export ->
+(-Z,Y,X)_source, because prop VVDs are Source Z-up (up = export +X), unlike
+player models. Rejected: baking instance transforms into the GLB (huge),
+box-only fallback (what the user complained about).
+Fixed along the way: StaticPropLump flags are the byte at offset 31 (offset
+64 is the DX level; the old code only "found" 5 lighting origins by
+coincidence — the real count is 254, 222 of the emitted props) and
+m_flUniformScale is the float at offset 56.
+Known: prop models are sun-lit, boxes were baked-unlit; the extras box
+size/center for exported props is still the keyword heuristic, so the click
+tolerance and the bbox overlay are approximate for large boulders.

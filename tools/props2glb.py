@@ -6,15 +6,27 @@ Two subcommands:
     python3 tools/props2glb.py <map.bsp> list [--top 20]
     python3 tools/props2glb.py <map.bsp> export --tf <tf_dir> --out <dir>
                                      [--top 5] [--model models/props_2fort/oildrum]
+                                     [--match REGEX[,REGEX...]]
 
 `list` parses the sprp game lump through tools/probe_props.py (the same path
 tools/add_props_glb.py uses), counts prop instances per model and prints the
 most frequent ones.
 
+`--match` filters the candidate models by a case-insensitive regular expression
+matched against the full model id (e.g. `models/props_coalmines/boulder_pile2`).
+It can be repeated or comma-separated and combines with `--top` (limit the
+matched set by instance count) and `--model` (filter the explicit list). When
+`--match` is given without `--top` and `--model`, every matching model of the
+map is selected.
+
 `export` runs the mdl2glb.py geometry pipeline (MDL v48 + VVD + dx90 VTX) in
 prop mode: skin family 0 only, one GLB per model, no red/blue team split,
 textures embedded as PNG. The GLB keeps the mdl2glb axis mapping
 (x, y, z) -> (z, y, -x), i.e. glTF Y-up, model forward = local +x.
+
+`export` also merges `<out>/manifest.json`:
+    {"version": 1, "models": {"<model id>": {"file": "<basename>.glb", "tris": N}}}
+Old entries are kept, and only successfully exported models are recorded.
 
 Prop materials differ from player materials in two ways that the player
 texture resolver does not handle:
@@ -35,6 +47,7 @@ import collections
 import contextlib
 import importlib.util
 import io
+import json
 import os
 import re
 import struct
@@ -202,6 +215,13 @@ class PropTextures(mdl2glb.Textures):
         return max(hits, key=lambda p: (self._score(p, lookup_dir), -len(p)))
 
     def load(self, texture_name: str):
+        # A handful of prop VMTs spell $basetexture with the extension
+        # (`models/props_coalmine/boulder5.vtf`), unlike the usual
+        # extensionless value. Normalise it away before probing the VPK,
+        # otherwise the resolver would look for `boulder5.vtf.vtf`.
+        texture_name = texture_name.replace("\\", "/")
+        if texture_name.lower().endswith(".vtf"):
+            texture_name = texture_name[:-4]
         if texture_name in self.cache:
             return self.cache[texture_name]
         low = texture_name.lower()
@@ -402,8 +422,102 @@ def print_summary(rows: list[dict], instances: dict[str, int]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Manifest
+# ---------------------------------------------------------------------------
+MANIFEST_NAME = "manifest.json"
+MANIFEST_VERSION = 1
+
+
+def load_manifest(out_dir: str) -> dict:
+    """Read <out_dir>/manifest.json, tolerating a missing or broken file."""
+    path = os.path.join(out_dir, MANIFEST_NAME)
+    models: dict = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if isinstance(data, dict) and isinstance(data.get("models"), dict):
+                models = {str(k): v for k, v in data["models"].items()
+                          if isinstance(v, dict)}
+            else:
+                print(f"  warn: {path}: unexpected schema, starting over",
+                      file=sys.stderr)
+        except Exception as exc:  # noqa: BLE001 - never fail the export for this
+            print(f"  warn: {path}: {exc}, starting over", file=sys.stderr)
+    return {"version": MANIFEST_VERSION, "models": models}
+
+
+def write_manifest(out_dir: str, rows: list[dict]) -> str:
+    """Merge successful exports into <out_dir>/manifest.json (sorted, indent 2).
+
+    Keys are full model ids without `.mdl`; `file` is the basename only.
+    Failed exports are skipped and never overwrite an existing good entry.
+    """
+    manifest = load_manifest(out_dir)
+    models: dict = manifest["models"]
+    added = 0
+    for stats in rows:
+        if not stats["ok"]:
+            continue
+        models[stats["model"]] = {
+            "file": os.path.basename(stats["out"]),
+            "tris": int(stats["tris"]),
+        }
+        added += 1
+    os.makedirs(out_dir, exist_ok=True)
+    path = os.path.join(out_dir, MANIFEST_NAME)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(manifest, f, indent=2, sort_keys=True)
+        f.write("\n")
+    print(f"manifest: {path} ({added} written this run, "
+          f"{len(models)} total entries)")
+    return path
+
+
+# ---------------------------------------------------------------------------
 # Commands
 # ---------------------------------------------------------------------------
+def compile_matches(patterns: list[str]) -> list[re.Pattern]:
+    """Compile --match values (already split, case-insensitive)."""
+    return [re.compile(p, re.IGNORECASE) for p in patterns]
+
+
+def matches_any(patterns: list[re.Pattern], model: str) -> bool:
+    return any(p.search(model) for p in patterns)
+
+
+def select_targets(names: list[str], counts: collections.Counter, top: int | None,
+                   explicit: list[str],
+                   patterns: list[re.Pattern]) -> list[str]:
+    """Pick the models to export.
+
+    * `--model` wins as the candidate list (then `--match` filters it).
+    * otherwise the whole sprp name table is the candidate list when
+      `--match` is given, so models are matched by id, not by rank;
+    * otherwise the `top` most frequent placed models are used.
+    A `--top` combined with `--match` keeps the N most frequent matches.
+    """
+    if explicit:
+        targets = [model_id(m) for m in explicit]
+    elif patterns:
+        targets = [model_id(n) for n in names]
+    else:
+        targets = [model_id(n) for n, _ in counts.most_common(top or 20)]
+
+    seen = set()
+    targets = [t for t in targets if not (t in seen or seen.add(t))]
+
+    if patterns:
+        targets = [t for t in targets if matches_any(patterns, t)]
+
+    if patterns and top is not None and not explicit:
+        # Instance count first, id as the deterministic tie-breaker.
+        targets.sort(key=lambda t: (-counts.get(t, 0), t))
+        targets = targets[:top]
+
+    return targets
+
+
 def cmd_list(bsp_path: str, top: int) -> int:
     names, counts, prop_count = enumerate_props(bsp_path)
     print(f"BSP: {bsp_path}")
@@ -417,19 +531,14 @@ def cmd_list(bsp_path: str, top: int) -> int:
     return 0
 
 
-def cmd_export(bsp_path: str, tf_dir: str, out_dir: str, top: int,
-               explicit: list[str]) -> int:
+def cmd_export(bsp_path: str, tf_dir: str, out_dir: str, top: int | None,
+               explicit: list[str], patterns: list[str]) -> int:
     names, counts, prop_count = enumerate_props(bsp_path)
     print(f"BSP: {bsp_path}")
     print(f"prop instances: {prop_count}, placed models: {len(counts)}")
 
-    if explicit:
-        targets = [model_id(m) for m in explicit]
-    else:
-        targets = [model_id(n) for n, _ in counts.most_common(top)]
-    # Deduplicate while keeping order.
-    seen = set()
-    targets = [t for t in targets if not (t in seen or seen.add(t))]
+    compiled = compile_matches(patterns)
+    targets = select_targets(names, counts, top, explicit, compiled)
 
     print(f"exporting {len(targets)} model(s) to {out_dir}")
     misc = mdl2glb.vpk.open_pack(tf_dir, "tf2_misc")
@@ -457,12 +566,15 @@ def cmd_export(bsp_path: str, tf_dir: str, out_dir: str, top: int,
     print(f"total {total_bytes} bytes ({total_bytes / 1024.0:.1f} KiB), "
           f"{total_time:.2f} s wall "
           f"({total_time / max(len(rows), 1) * 1000.0:.0f} ms/model)")
+    if rows:
+        write_manifest(out_dir, rows)
     return 0 if failed == 0 else 1
 
 
 USAGE = """usage:
   props2glb.py <map.bsp> list [--top N]
-  props2glb.py <map.bsp> export --tf <tf_dir> --out <dir> [--top N] [--model M ...]"""
+  props2glb.py <map.bsp> export --tf <tf_dir> --out <dir>
+                               [--top N] [--model M ...] [--match REGEX[,REGEX...]]"""
 
 
 def main(argv: list[str]) -> int:
@@ -472,14 +584,17 @@ def main(argv: list[str]) -> int:
     bsp_path, command = argv[1], argv[2]
     rest = argv[3:]
     top = 20
+    top_given = False
     tf_dir = None
     out_dir = None
     explicit: list[str] = []
+    match_values: list[str] = []
     i = 0
     while i < len(rest):
         arg = rest[i]
         if arg == "--top" and i + 1 < len(rest):
             top = int(rest[i + 1])
+            top_given = True
             i += 2
         elif arg == "--tf" and i + 1 < len(rest):
             tf_dir = rest[i + 1]
@@ -489,6 +604,11 @@ def main(argv: list[str]) -> int:
             i += 2
         elif arg == "--model" and i + 1 < len(rest):
             explicit.append(rest[i + 1])
+            i += 2
+        elif arg == "--match" and i + 1 < len(rest):
+            # Repeatable and comma-separated; empty fragments are ignored.
+            match_values.extend(
+                part for part in rest[i + 1].split(",") if part.strip())
             i += 2
         else:
             print(f"unknown argument {arg!r}\n{USAGE}", file=sys.stderr)
@@ -500,7 +620,15 @@ def main(argv: list[str]) -> int:
         if not tf_dir or not out_dir:
             print(f"export needs --tf and --out\n{USAGE}", file=sys.stderr)
             return 2
-        return cmd_export(bsp_path, tf_dir, out_dir, top, explicit)
+        if match_values:
+            try:
+                re.compile("|".join(f"(?:{p})" for p in match_values),
+                           re.IGNORECASE)
+            except re.error as exc:
+                print(f"bad --match regex: {exc}\n{USAGE}", file=sys.stderr)
+                return 2
+        return cmd_export(bsp_path, tf_dir, out_dir,
+                          top if top_given else None, explicit, match_values)
     print(f"unknown command {command!r}\n{USAGE}", file=sys.stderr)
     return 2
 

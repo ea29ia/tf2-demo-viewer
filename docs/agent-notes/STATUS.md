@@ -19,6 +19,19 @@ https://github.com/ea29ia/tf2-demo-viewer (public).
 
 ## Working (verified 2026-10-21 with the exact commands below)
 
+- **Real boulder meshes (2026-10-23)**: 21 `boulder_*` models exported by
+  `tools/props2glb.py --match boulder` into `web/public/models/props/` (21 MiB,
+  textures embedded) with `manifest.json`. `tools/add_props_glb.py` now stores
+  the full instance transform in the props extras (`o/a/k/m`), reads the
+  manifest, and omits the 140 boulder boxes; the viewer
+  (`web/src/viewer/propModels.ts`) instances the real meshes by COLOR-free
+  `M = T(o)·R·S(k)·C`. StaticPropLump flags are read from byte 31 (was 64 =
+  DX level) and uniform scale from float 56. Verified: full GLB chain +
+  `validate_glb.py` PASS (21.6 MiB, 57334 tris, props mesh 11880 tris,
+  140 boxes omitted), `tsc --noEmit` and `npm run build` exit 0. Placement,
+  orientation and scale still need a HUMAN visual check with
+  `cd web && npm run dev`.
+
 - **Source-fidelity map pass (2026-10-23)**: lightmap luxels are decoded as
   ColorRGBExp32 -> sRGB (was BGRA, red/blue swapped, exponent dropped), the
   grid is (size+1)^2 with stride size+1, displacement lightmap UVs use the

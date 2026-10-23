@@ -1,0 +1,89 @@
+{
+  "models": {
+    "models/props_coalmines/boulder1": {
+      "file": "props_coalmines_boulder1.glb",
+      "tris": 544
+    },
+    "models/props_coalmines/boulder1_large": {
+      "file": "props_coalmines_boulder1_large.glb",
+      "tris": 544
+    },
+    "models/props_coalmines/boulder1_medium": {
+      "file": "props_coalmines_boulder1_medium.glb",
+      "tris": 544
+    },
+    "models/props_coalmines/boulder2": {
+      "file": "props_coalmines_boulder2.glb",
+      "tris": 246
+    },
+    "models/props_coalmines/boulder2_large": {
+      "file": "props_coalmines_boulder2_large.glb",
+      "tris": 246
+    },
+    "models/props_coalmines/boulder2_medium": {
+      "file": "props_coalmines_boulder2_medium.glb",
+      "tris": 246
+    },
+    "models/props_coalmines/boulder3": {
+      "file": "props_coalmines_boulder3.glb",
+      "tris": 146
+    },
+    "models/props_coalmines/boulder3_medium": {
+      "file": "props_coalmines_boulder3_medium.glb",
+      "tris": 146
+    },
+    "models/props_coalmines/boulder4_large": {
+      "file": "props_coalmines_boulder4_large.glb",
+      "tris": 272
+    },
+    "models/props_coalmines/boulder5": {
+      "file": "props_coalmines_boulder5.glb",
+      "tris": 2302
+    },
+    "models/props_coalmines/boulder5_huge": {
+      "file": "props_coalmines_boulder5_huge.glb",
+      "tris": 2302
+    },
+    "models/props_coalmines/boulder5_large": {
+      "file": "props_coalmines_boulder5_large.glb",
+      "tris": 2302
+    },
+    "models/props_coalmines/boulder5_medium": {
+      "file": "props_coalmines_boulder5_medium.glb",
+      "tris": 2302
+    },
+    "models/props_coalmines/boulder6": {
+      "file": "props_coalmines_boulder6.glb",
+      "tris": 2130
+    },
+    "models/props_coalmines/boulder6_huge": {
+      "file": "props_coalmines_boulder6_huge.glb",
+      "tris": 2130
+    },
+    "models/props_coalmines/boulder6_large": {
+      "file": "props_coalmines_boulder6_large.glb",
+      "tris": 2130
+    },
+    "models/props_coalmines/boulder7": {
+      "file": "props_coalmines_boulder7.glb",
+      "tris": 1558
+    },
+    "models/props_coalmines/boulder7_huge": {
+      "file": "props_coalmines_boulder7_huge.glb",
+      "tris": 1558
+    },
+    "models/props_coalmines/boulder7_large": {
+      "file": "props_coalmines_boulder7_large.glb",
+      "tris": 1558
+    },
+    "models/props_coalmines/boulder_pile1": {
+      "file": "props_coalmines_boulder_pile1.glb",
+      "tris": 1112
+    },
+    "models/props_coalmines/boulder_pile2": {
+      "file": "props_coalmines_boulder_pile2.glb",
+      "tris": 1112
+    }
+  },
+  "version": 1
+}

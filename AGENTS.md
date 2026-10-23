@@ -95,6 +95,14 @@ Dev server: `cd web && npm run dev` (port 5173). `npm run build` output goes to
 
 ## Agent coordination
 
+**Always delegate implementation to subagents after computing file
+collisions.** Before dispatching, list the files each work item touches, count
+the overlaps (code files, generated artifacts such as the map GLB/atlas/dist,
+and shared interfaces), give every agent a disjoint file set, reserve the
+canonical artifacts and docs for the lead, and state the interface contracts
+explicitly in the prompts. Parallel agents must never regenerate
+`web/public/maps/pl_upward.glb` or `_lm.png`; they use `/tmp/opencode/` copies.
+
 Before starting a task, read `docs/agent-notes/STATUS.md` and any note in
 `docs/agent-notes/` tagged with your task area (see its README.md for the note
 format and rules). After finishing work, update `STATUS.md` in the same commit
