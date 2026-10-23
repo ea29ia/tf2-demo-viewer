@@ -79,8 +79,8 @@ python3 tools/bsp2glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
 python3 tools/add_textures_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb
 python3 tools/add_props_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb web/public/models/props/manifest.json
 python3 tools/add_kits_glb.py web/public/maps/pl_upward.glb web/public/maps/kits.json
-python3 tools/validate_glb.py web/public/maps/pl_upward.glb
 python3 tools/add_brushmodels_glb.py assets/pl_upward.bsp web/public/maps/pl_upward.glb web/public/models/props/manifest.json
+python3 tools/validate_glb.py web/public/maps/pl_upward.glb
 python3 tools/export_sky.py assets/pl_upward.bsp web/public/maps
 ```
 (add_textures_glb.py needs the local TF2 install for VPK textures; it
