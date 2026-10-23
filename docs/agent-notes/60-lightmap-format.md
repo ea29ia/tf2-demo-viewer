@@ -7,9 +7,12 @@
 
 ## State
 
-Format fully decoded empirically on pl_upward; renderer integration NOT
-started. Next session can implement `add_lightmaps_glb.py` / bsp2glb support
-directly from this note.
+IMPLEMENTED (2026-10-23, see STATUS): bsp2glb.py packs lightmap rects into a
+2048^2 atlas (1px gutters, white 2x2 unlit cell), emits TEXCOORD_1, and
+writes `<map>_lm.png` next to the GLB; playback.ts binds it as
+material.lightMap (sRGB, flipY=false) on meshes with uv1 and swaps world
+materials to MeshBasicMaterial (baked light replaces direct lighting).
+Format findings below remain the reference for other maps / rework.
 
 ## Verified facts (all on assets/pl_upward.bsp, 15691 faces)
 

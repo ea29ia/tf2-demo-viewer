@@ -391,3 +391,19 @@ models / 1244 instances).
 - Environment note: the OpenCode subagent free tier ran out mid-session;
   the four partially-run agents' output was verified by hand before use
   (all good), and the remaining work was done in the main session.
+
+## Session update — 2026-10-23 (later): lightmaps SHIPPED (phase 3)
+- bsp2glb.py: lightmap atlas 2048^2 (shelf-pack, 1px gutter, white 2x2 cell
+  at origin for unlit faces), TEXCOORD_1 per vertex, <map>_lm.png sidecar
+  (2.2 MiB). 13994 faces lightmapped. GLB 16.76 MiB, validate PASS.
+- playback.ts: atlas -> material.lightMap (SRGBColorSpace — display-referred
+  bytes; flipY=false), ONLY for meshes with a uv1 attribute (props/kits/
+  foliage have none and stay sun-lit); world materials swapped to
+  MeshBasicMaterial (baked light replaces direct lighting on the map);
+  sun 2.6->1.4, fill 0.85->0.45, hemi 2.1->1.2 when baked.
+- Verified: tsc 0, chromium renders dark interior vs warm sunlit yard;
+  brightness stats old vs new: mean 13.7 -> 19.0, bright(>60) 0.6% -> 3.2%.
+  USER eyeball pending (hard reload; look for seams at face borders, tunnel
+  darkness, overall exposure).
+- Implementation details/gotchas: see 60-lightmap-format.md (its "sketch"
+  section is now implemented; gamma question resolved via SRGBColorSpace).

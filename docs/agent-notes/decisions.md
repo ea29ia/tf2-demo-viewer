@@ -125,3 +125,12 @@ material gets its own PNG inside the GLB: 512^2 for the high-area materials
 (painted area >= 200k u^2), 256^2 for the rest — 16.2 MiB GLB, user set no
 hard size limit. Rejected: 1024 native (56.5 MiB raw, >100 MiB GLB), atlas
 (breaks tiling), serving loose PNGs (two round trips, cache discipline).
+
+## 2026-10-23: lightmap atlas as PNG sidecar + MeshBasic world materials
+GLTF has no lightmap slot, so the atlas ships as <map>_lm.png next to the
+GLB and is assigned to material.lightMap after load (only meshes with a uv1
+attribute). World materials become MeshBasicMaterial: the baked light IS the
+map's lighting — direct lights would double-light it, and basic materials
+ignore them by definition (props/players keep the sun). Rejected: embedding
+the atlas in the GLB (no glTF slot, parser hacks), MeshStandard+lightMap
+(needed manual sun disabling anyway, kept PBR cost for a fully baked mesh).
