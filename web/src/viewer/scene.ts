@@ -27,10 +27,10 @@ export const camera = new THREE.PerspectiveCamera(
 );
 camera.rotation.order = 'YXZ';
 
-export const hemi = new THREE.HemisphereLight(0x9fc5ff, 0x2a2118, 2.1);
+export const hemi = new THREE.HemisphereLight(0x9fc5ff, 0x2a2118, 1.15);
 scene.add(hemi);
 
-export const sun = new THREE.DirectionalLight(0xfff0d2, 2.6);
+export const sun = new THREE.DirectionalLight(0xfff0d2, 2.3);
 sun.position.set(4200, 7000, 3400);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
@@ -38,7 +38,7 @@ sun.shadow.bias = -0.0005;
 scene.add(sun);
 scene.add(sun.target);
 
-export const fill = new THREE.DirectionalLight(0x6f9cd6, 0.85);
+export const fill = new THREE.DirectionalLight(0x6f9cd6, 0.5);
 fill.position.set(-5000, 2600, -4200);
 scene.add(fill);
 

@@ -563,10 +563,14 @@ async function loadMap(): Promise<void> {
   }
 
   // The baked lightmap is off (LIGHTMAP_INTENSITY = 0): the sun + scene
-  // lights and shadows do the shading, so keep the full original intensities.
-  sun.intensity = 2.6;
-  fill.intensity = 0.85;
-  hemi.intensity = 2.1;
+  // lights and shadows do the shading. The balance below is tuned so that
+  // BOTH the map (MeshStandard, possibly vertex-tinted) and the instanced
+  // prop models keep their albedo: a high hemisphere/fill floor plus a hot
+  // sun washed prop textures out toward white (measured: rusty oildrum
+  // albedo ~0.55 rendered ~0.9). Direct/diffuse ratio favours the sun.
+  sun.intensity = 2.3;
+  fill.intensity = 0.5;
+  hemi.intensity = 1.15;
 
   resetFreeCamera();
   applyWireframe();
