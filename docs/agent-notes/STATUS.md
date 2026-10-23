@@ -672,3 +672,20 @@ User: gates vanished entirely, no cart even at t=0, lockers wrong vs walls.
   browser console. Moving cart = replay v4 (path_track motion), the known
   TODO.
 Verified: validate_glb.py PASS, tsc + build exit 0. USER eyeball pending.
+
+## Session update — 2026-10-24: gates restored (final), locker yaw calibrated
+
+User feedback round: red lockers correct with authored angles, blue need
++90 CCW; gates and cart invisible. Findings:
+- The browser had a STALE GLB (console: 1212 prop entries vs 1240 in the
+  file) — the wall-snap build never reached the user; also a gltf.pop("_bin")
+  bug wrote a ZERO-length BIN chunk (caught by validate_glb.py; chain
+  rebuilt from scratch).
+- Final tool state: brush pass (door panels, origin-translated) + prop_dynamic
+  extras; locker yaw = authored, blue-side (x<0) +90 CCW (red confirmed
+  correct by the user). The raycast wall-snap did not match the user's
+  in-game observations — code kept but unused.
+- Cart: static parts ARE in extras (1210 instanced placements included
+  them); the user's "no cart" report needs a browser-side check of
+  [props] warnings after a hard reload. Moving cart = replay v4 TODO.
+Verified: validate_glb.py PASS (44986 tris), tsc + build exit 0.

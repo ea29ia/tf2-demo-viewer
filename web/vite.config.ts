@@ -131,6 +131,30 @@ async function handleDemoDump(
   }
 }
 
+function noStorePublicAssets(): Plugin {
+  // Dev/preview only: public assets (map GLB, lightmap atlas, prop GLBs,
+  // replay.bin) are rebuilt in place by the python chain while the server
+  // runs. Firefox kept serving a stale pl_upward.glb from its disk cache
+  // (the file has no built-in revalidation trigger), which made every
+  // pipeline fix invisible until a manual cache wipe. Serve them no-store
+  // so a plain reload always shows the latest build.
+  const mount = (server: { middlewares: Connect.Server }): void => {
+    server.middlewares.use((req, res, next) => {
+      const url = req.url?.split('?')[0] ?? '';
+      if (url.startsWith('/maps/') || url.startsWith('/models/')
+          || url.startsWith('/replay/')) {
+        res.setHeader('cache-control', 'no-store');
+      }
+      next();
+    });
+  };
+  return {
+    name: 'no-store-public-assets',
+    configureServer: mount,
+    configurePreviewServer: mount,
+  };
+}
+
 function demoDumperPlugin(): Plugin {
   const mount = (server: { middlewares: Connect.Server }): void => {
     server.middlewares.use((req, res, next) => {
@@ -155,5 +179,5 @@ function demoDumperPlugin(): Plugin {
 }
 
 export default defineConfig({
-  plugins: [demoDumperPlugin()],
+  plugins: [noStorePublicAssets(), demoDumperPlugin()],
 });
