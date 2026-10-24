@@ -83,6 +83,14 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     errHurtBlockTruncated: 'Повреждён replay.bin: обрезан блок урона кадра #{n}',
     errHurtDataTruncated:
       'Повреждён replay.bin: урон кадра #{n} требует {need} байт, осталось {left}',
+    errBuildingBlockTruncated:
+      'Повреждён replay.bin: обрезан блок построек кадра #{n}',
+    errBuildingDataTruncated:
+      'Повреждён replay.bin: постройки кадра #{n} требуют {need} байт, осталось {left}',
+    errKitBlockTruncated:
+      'Повреждён replay.bin: обрезан блок аптечек/патронов кадра #{n}',
+    errKitDataTruncated:
+      'Повреждён replay.bin: аптечки/патроны кадра #{n} требуют {need} байт, осталось {left}',
     // projectile labels
     projRocket: 'Ракета',
     projArrow: 'Стрела',
@@ -105,6 +113,16 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     propLight: 'свет',
     propTree: 'дерево',
     propDefault: 'проп',
+    // engineer buildings
+    buildingSentry: 'Турель',
+    buildingMini: 'Мини-турель',
+    buildingDispenser: 'Раздатчик',
+    buildingTeleIn: 'Телепорт (вход)',
+    buildingTeleOut: 'Телепорт (выход)',
+    buildingLevel: 'уровень {n}',
+    buildingSapped: 'под сапом',
+    buildingBuilding: 'строится',
+    buildingTag: 'постройка',
   },
   en: {
     // HUD
@@ -178,6 +196,13 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     errHurtBlockTruncated: 'Corrupted replay.bin: hurt block of frame #{n} is truncated',
     errHurtDataTruncated:
       'Corrupted replay.bin: hurts of frame #{n} need {need} bytes, {left} left',
+    errBuildingBlockTruncated:
+      'Corrupted replay.bin: building block of frame #{n} is truncated',
+    errBuildingDataTruncated:
+      'Corrupted replay.bin: buildings of frame #{n} need {need} bytes, {left} left',
+    errKitBlockTruncated: 'Corrupted replay.bin: kit block of frame #{n} is truncated',
+    errKitDataTruncated:
+      'Corrupted replay.bin: kits of frame #{n} need {need} bytes, {left} left',
     // projectile labels
     projRocket: 'Rocket',
     projArrow: 'Arrow',
@@ -200,6 +225,16 @@ const STRINGS: Record<Lang, Record<string, string>> = {
     propLight: 'light',
     propTree: 'tree',
     propDefault: 'prop',
+    // engineer buildings
+    buildingSentry: 'Sentry gun',
+    buildingMini: 'Mini sentry',
+    buildingDispenser: 'Dispenser',
+    buildingTeleIn: 'Teleporter (entrance)',
+    buildingTeleOut: 'Teleporter (exit)',
+    buildingLevel: 'level {n}',
+    buildingSapped: 'sapped',
+    buildingBuilding: 'under construction',
+    buildingTag: 'building',
   },
 };
 

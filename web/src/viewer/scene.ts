@@ -52,6 +52,12 @@ scene.add(playerGroup);
 export const projectileGroup = new THREE.Group();
 scene.add(projectileGroup);
 
+export const buildingGroup = new THREE.Group();
+scene.add(buildingGroup);
+
+export const kitGroup = new THREE.Group();
+scene.add(kitGroup);
+
 export const damageGroup = new THREE.Group();
 scene.add(damageGroup);
 

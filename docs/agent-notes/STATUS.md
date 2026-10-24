@@ -703,3 +703,89 @@ yaws [180, 90, 270, 270, 270, 180].
 Also: Firefox blocked a file:/// reference (user tried attaching a local
 file path somewhere) — parked in TODO; AGENTS/STATUS updated.
 USER: plain reload should now be enough.
+
+## Session update — 2026-10-24 (3): replay.bin v4 — buildings + kits (subagent)
+
+- **Format v4** (PLAN.md contract updated): two new per-frame blocks after the
+  hurt block — buildings (15 B/record: entity u16, team u8, kind u8
+  0=sentry/1=dispenser/2=tp_entrance/3=tp_exit, flags u8 bit0 building bit1
+  sapped bit2 mini, level u8, health u8 quantized hp/maxhp*255, angle u16
+  deg/360*65535, xyz i16/4) and kits (10 B/record: index u16 = kits.json array
+  order, kind u8 0..5 health small/medium/full + ammo small/medium/full,
+  flags u8 bit0 present, xyz i16/4). VERSION=4 in main.rs + replay.ts +
+  validate.py, all in one change-set.
+- **Buildings** come from `GameState.buildings` (analyser-managed); zero-pos
+  and non-player teams skipped, cap 32/frame. demp.dem: max 10 buildings
+  concurrently in PVS, 87334/95349 frames carry buildings.
+- **Kits**: `--kits web/public/maps/kits.json` CLI flag (optional; absent ->
+  kit_count 0). Pickup tracking via `item_pickup` events is implemented
+  (nearest kit of matching kind within 200 u, respawn 10/20/30 s) BUT
+  demp.dem carries zero item_pickup events (they are per-client in TF2 and
+  don't reach POV demos; not even in the event-definition list — verified by
+  byte-grep), so kits in this replay are always-present. Follow-up if real
+  kit state is needed: track kit entities' sendprops with a custom handler.
+  `web/vite.config.ts` now passes `--kits` to the dumper in /__dump_demo.
+- **Reader**: replay.ts parses the new blocks into `ReplayFrame.buildings`
+  / `.kits` (typed arrays, exported types); i18n keys errBuilding*Truncated /
+  errKit*Truncated (RU+EN). No rendering wiring (follow-up task). v3 files
+  are rejected with the localized version error.
+- **Spec deviation**: the task draft said building records are 20 B; the
+  field list sums to 15 — implemented 15 everywhere (documented in PLAN.md).
+  The 20 constant initially slipped into replay.ts and broke mid-file parsing;
+  caught by an esbuild+node smoke-parse of the real replay.ts against the new
+  bin (parse 1.3 s for 66.5 MB, indexes 0..29 verified). Keep that smoke test
+  for future format bumps.
+- **Verified**: `cargo build --release` OK; dumper regenerated
+  web/public/replay from `tf/demp.dem` (identified by meta: pl_upward,
+  LepeMot, 1434.21 s, 95349 frames, 487 kills = STATUS's demp.dem entry; v3
+  backup kept in web/public/replay/backup_v3/); `validate.py` -> OK
+  (max_buildings 10, max_kits 30); `tsc --noEmit` + `npm run build` exit 0.
+  Not committed (lead commits).
+
+## Session update — 2026-10-24 (4): building + kit RENDERING wired (subagent)
+
+- **Viewer rendering for replay v4 buildings/kits** (`web/src/viewer/buildings.ts`,
+  `kits.ts`, both NEW, wired in `playback.ts`): `applyBuildings()` /
+  `applyKits()` are called from `applyReplayPoses()` right after
+  `applyProjectiles()`; `clearBuildings()` on demo reload (stale entity ids);
+  `loadKits()` fire-and-forget from `loadMap()` (missing kits.json only
+  disables the overlay). Scene groups `buildingGroup`/`kitGroup` in
+  `scene.ts`. Buildings are three.js primitive placeholders (sentry box +
+  yawing turret head using the playerViews yaw convention
+  `rotation.y = degToRad(yaw)`, dispenser box+top, teleporter pads with a
+  spinning entrance disc), team-colored via `tf2.teamColor`, mini sentry 0.6
+  scale, sapped = purple tint + emissive pulse, in-construction = 50%
+  opacity + frozen turret. Health bar = floating sprite, green->red HSL lerp,
+  shown only when health < 100%. Positions/interp use the project mapping
+  (x,y,z)->(x,z,-y) with a 512 u teleport snap, per-frame lerp between frames
+  like projectiles. Kit overlay: one emissive octahedron marker per kits.json
+  entry hovering 26+size above the pad, per-frame visibility driven by
+  `KitRecord.flags` bit0; join key `index` == kits.json array index (verified:
+  30 entries == max 30 kits/frame). Click-inspect: `pickBuilding()` in
+  inspect.ts shows "Sentry gun · level 2 · 80% HP · sapped"; new i18n keys
+  buildingSentry/Mini/Dispenser/TeleIn/TeleOut/Level/Sapped/Building/Tag
+  (RU+EN).
+- **Feature detection**: both per-frame updates guard with
+  `Array.isArray(frame.buildings / .kits)`, so a frame object without the v4
+  arrays (or renamed fields) is a no-op, not a crash. Note: since replay.ts
+  VERSION=4 rejects v3 files at parse time, the practical v3 failure mode is
+  the existing error overlay; the Array.isArray guards additionally protect
+  against reader/writer drift within v4.
+- **Contract verified against web/src/replay.ts** (the parallel agent landed
+  it): BuildingRecord/KitRecord match the task contract exactly, angles arrive
+  already dequantized in degrees (smoke test: 286.91), health 0..255. A
+  defensive `angleDegrees()` heuristic (>361 -> treat as u16-quantized) is
+  kept in buildings.ts but is inert with the current writer. No
+  types-v4.d.ts stub needed.
+- **Smoke test (esbuild+node, numeric only)**: bundled replay.ts, parsed the
+  on-disk v4 replay.bin — 95349 frames in 1.4 s, every frame carries
+  buildings (max 10) + kits (max 30), 131063 sentry records, angles/positions
+  sane. Verified: `cd web && npx tsc --noEmit` exit 0, `npm run build` exit 0
+  (695 kB JS). Visual check is a HUMAN task: `cd web && npm run dev` and look
+  for sentries/dispensers/teleporters on pl_upward (demp.dem has 10) and kit
+  markers above the baked pads. Not committed (lead commits).
+- **Re-verified by the follow-up session (2026-10-24)**: the full chain was
+  re-run against the finished change-set with identical results —
+  `cargo build --release` OK, `validate.py` -> OK (max_buildings 10,
+  max_kits 30), `tsc --noEmit` + `npm run build` exit 0; backup_v3 confirmed
+  to still be v3 by header bytes; no code changes needed.

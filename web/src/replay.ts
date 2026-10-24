@@ -26,8 +26,10 @@ import { t } from './i18n';
 export const RECORD_SIZE = 27;
 export const PROJ_RECORD_SIZE = 17;
 export const HURT_RECORD_SIZE = 15;
+export const BUILDING_RECORD_SIZE = 15;
+export const KIT_RECORD_SIZE = 10;
 export const MAGIC = 'TF2R';
-export const VERSION = 3;
+export const VERSION = 4;
 
 export type TeamName = 'red' | 'blue' | string;
 
@@ -97,11 +99,35 @@ export interface HurtRecord {
   splash: number;
 }
 
+export interface BuildingRecord {
+  entity: number;
+  team: number; // 2=red, 3=blue
+  kind: number; // 0 sentry, 1 dispenser, 2 teleporter entrance, 3 teleporter exit
+  flags: number; // bit0 building(in-construction), bit1 sapped, bit2 mini
+  level: number; // 1..3, 0 while constructing
+  health: number; // quantized health/maxhealth * 255
+  angle: number; // degrees (dequantized from u16)
+  x: number;
+  y: number;
+  z: number;
+}
+
+export interface KitRecord {
+  index: number; // 1:1 with web/public/maps/kits.json array order
+  kind: number; // 0 health_small, 1 health_medium, 2 health_full, 3 ammo_small, 4 ammo_medium, 5 ammo_full
+  flags: number; // bit0 present
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface ReplayFrame {
   tick: number;
   records: PlayerRecord[];
   projectiles: ProjectileRecord[];
   hurts: HurtRecord[];
+  buildings: BuildingRecord[];
+  kits: KitRecord[];
 }
 
 export interface Replay {
@@ -258,7 +284,6 @@ export function parseReplay(buffer: ArrayBuffer): Replay {
           t('errHurtDataTruncated', { n: f, need: hbytes, left: total - offset }),
         );
       }
-      hurts = new Array(hurtCount);
       for (let i = 0; i < hurtCount; i++) {
         const q = (o: number): number => view.getInt16(offset + o, true) * 4;
         hurts[i] = {
@@ -275,7 +300,69 @@ export function parseReplay(buffer: ArrayBuffer): Replay {
       }
     }
 
-    frames[f] = { tick, records, projectiles, hurts };
+    // v4: engineer building block after the hurt block.
+    let buildings: BuildingRecord[] = [];
+    if (version >= 4) {
+      if (offset + 2 > total) {
+        throw new Error(t('errBuildingBlockTruncated', { n: f }));
+      }
+      const buildingCount = view.getUint16(offset, true);
+      offset += 2;
+      const bbytes = buildingCount * BUILDING_RECORD_SIZE;
+      if (offset + bbytes > total) {
+        throw new Error(
+          t('errBuildingDataTruncated', { n: f, need: bbytes, left: total - offset }),
+        );
+      }
+      buildings = new Array(buildingCount);
+      for (let i = 0; i < buildingCount; i++) {
+        const q = (o: number): number => view.getInt16(offset + o, true) * 4;
+        buildings[i] = {
+          entity: view.getUint16(offset, true),
+          team: view.getUint8(offset + 2),
+          kind: view.getUint8(offset + 3),
+          flags: view.getUint8(offset + 4),
+          level: view.getUint8(offset + 5),
+          health: view.getUint8(offset + 6),
+          angle: (view.getUint16(offset + 7, true) / 65535) * 360,
+          x: q(9),
+          y: q(11),
+          z: q(13),
+        };
+        offset += BUILDING_RECORD_SIZE;
+      }
+    }
+
+    // v4: static health/ammo kit block after the building block.
+    let kits: KitRecord[] = [];
+    if (version >= 4) {
+      if (offset + 2 > total) {
+        throw new Error(t('errKitBlockTruncated', { n: f }));
+      }
+      const kitCount = view.getUint16(offset, true);
+      offset += 2;
+      const kbytes = kitCount * KIT_RECORD_SIZE;
+      if (offset + kbytes > total) {
+        throw new Error(
+          t('errKitDataTruncated', { n: f, need: kbytes, left: total - offset }),
+        );
+      }
+      kits = new Array(kitCount);
+      for (let i = 0; i < kitCount; i++) {
+        const q = (o: number): number => view.getInt16(offset + o, true) * 4;
+        kits[i] = {
+          index: view.getUint16(offset, true),
+          kind: view.getUint8(offset + 2),
+          flags: view.getUint8(offset + 3),
+          x: q(4),
+          y: q(6),
+          z: q(8),
+        };
+        offset += KIT_RECORD_SIZE;
+      }
+    }
+
+    frames[f] = { tick, records, projectiles, hurts, buildings, kits };
   }
 
   // Be tolerant of a producer that writes frames in a different order.

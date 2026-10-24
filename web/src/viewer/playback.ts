@@ -41,6 +41,8 @@ import { resetFreeCamera, updateCamera } from './camera';
 import { views, createPlayerView, viewFor, applyPose, hideAllViews } from './playerViews';
 import { posesAt } from './frameCache';
 import { applyProjectiles } from './projectiles';
+import { applyBuildings, clearBuildings } from './buildings';
+import { loadKits, applyKits } from './kits';
 import { updateDamageFx } from './damageFx';
 import { collectPropEntries, buildPropBoxOverlay } from './inspect';
 import { loadPropModels } from './propModels';
@@ -77,6 +79,8 @@ function applyReplayPoses(): void {
   }
 
   applyProjectiles();
+  applyBuildings();
+  applyKits();
   updateDamageFx();
   updateHud();
 }
@@ -535,6 +539,12 @@ async function loadMap(): Promise<void> {
     if (wireframeInput.checked) applyWireframe();
   });
 
+  // Kit demo-state overlay (markers above the baked pads). Cosmetic:
+  // a missing kits.json only disables the overlay, never the map.
+  void loadKits().catch((err) => {
+    console.warn('[kits] load failed:', (err as Error).message);
+  });
+
   const propCount = collectPropEntries(gltf.scene);
   console.log('[inspect] prop entries loaded:', propCount);
 
@@ -648,6 +658,8 @@ async function loadDemoFile(file: File): Promise<void> {
     views.clear();
     state.selectedEntity = null;
     state.cameraMode = 'free';
+    // Building views belong to the previous demo's entity ids — drop them.
+    clearBuildings();
 
     setupReplay(replay);
     updateModeButtons();

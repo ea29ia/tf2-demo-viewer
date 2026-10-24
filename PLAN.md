@@ -39,10 +39,10 @@ Snapshot whenever `state.tick` changes. Include only players whose team is red/b
 }
 ```
 
-`replay.bin` (little endian), **version 3** (current):
+`replay.bin` (little endian), **version 4** (current):
 ```
 magic        4 bytes  "TF2R"
-version      u32      = 3
+version      u32      = 4
 meta_len     u32
 meta         meta_len bytes UTF-8 JSON (same content as meta.json)
 frame_count  u32
@@ -77,6 +77,25 @@ frames[frame_count]:
     splash   i16     quantized / 4; !=0 marks explosion damage with this
                     radius (by weapon id: rocket/grenade/sticky/sentry 146,
                     flare 110)
+  building_count  u16   (v4)
+  building_count records (15 bytes each; note: the field list below sums
+                  to 15, an earlier draft said 20):
+    entity   u16    server entity id of the object
+    team     u8     2=red 3=blue
+    kind     u8     0=sentry 1=dispenser 2=teleporter_entrance 3=teleporter_exit
+    flags    u8     bit0 building(in-construction), bit1 sapped, bit2 mini
+    level    u8     1..3 (0 while constructing)
+    health   u8     quantized health/maxhealth * 255
+    angle    u16    quantized yaw: degrees/360 * 65535
+    x,y,z    i16 x3  quantized Source units / 4
+  kit_count       u16   (v4)
+  kit_count records (10 bytes each):
+    index    u16    static kit index; 1:1 with the entries of
+                    web/public/maps/kits.json (array order = index)
+    kind     u8     0=health_small 1=health_medium 2=health_full
+                    3=ammo_small 4=ammo_medium 5=ammo_full
+    flags    u8     bit0 present (picked-up kits have bit0=0)
+    x,y,z    i16 x3  quantized Source units / 4
 ```
 
 Notes:
@@ -90,6 +109,18 @@ Notes:
   `player_hurt` events whenever the event is more recent than the last observed
   prop change; dead players are always reported 0 (the sendprop often still
   reads 1 while dead).
+- Buildings (v4) come from the analyser's `GameState.buildings` (cleared on
+  RoundStart by the analyser itself, removed on entity deletion). The dumper
+  caps the per-frame list at 32 (u16 count would allow more; the cap keeps
+  frames bounded).
+- Kits (v4) are the map's static health/ammo pickups. The analyser does not
+  track them, so the dumper keeps the placements from `--kits <kits.json>`
+  (same file the GLB chain writes; array order defines the index) and flips
+  bit0 off when an `item_pickup` game event names the matching kit kind near
+  the picker. Respawn times: small 10 s, medium 20 s, full 30 s (health and
+  ammo alike). Without `--kits` the kit block is emitted with count 0.
+  Player-dropped medkits (`item_pickup` strings starting with `medkit`) are
+  intentionally ignored: they are not BSP kit placements.
 
 Acceptance: `dem2replay demo.dem out` exits 0; on `demo_upward1.dem`:
 55842 frames, max players 24, max projectiles 12; `validate.py` prints OK.

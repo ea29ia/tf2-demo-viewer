@@ -7,6 +7,7 @@ import { inspectCard, inspectTitle, inspectLabel, inspectMeta, inspectClose } fr
 import { renderer, camera } from './scene';
 import { state } from './state';
 import { activePointers } from './input';
+import { pickBuilding } from './buildings';
 import { t } from '../i18n';
 
 // ---------------------------------------------------------------------------
@@ -178,7 +179,19 @@ function inspectAt(clientX: number, clientY: number): void {
     }
   }
   if (best) showInspect(best);
-  else hideInspect();
+  else {
+    // Engineer buildings are not prop entries; they win only when the ray
+    // hits one nearer than the best prop match (or when no prop matched).
+    const building = pickBuilding(raycaster, bestDist);
+    if (building) {
+      inspectTitle.textContent = building.title;
+      inspectLabel.textContent = t('buildingTag');
+      inspectMeta.textContent = building.meta || '\u00a0';
+      inspectCard.classList.remove('hidden');
+    } else {
+      hideInspect();
+    }
+  }
 }
 
 inspectClose.addEventListener('click', hideInspect);

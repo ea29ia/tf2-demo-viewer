@@ -10,12 +10,13 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde_json::{Value, json};
-use tf_demo_parser::demo::data::game_state::{GameState, PlayerState};
+use tf_demo_parser::demo::data::game_state::{Building, GameState, PlayerState};
+use tf_demo_parser::demo::gameevent_gen::ItemPickupEvent;
 use tf_demo_parser::demo::parser::gamestateanalyser::{GameStateAnalyser, Team};
 use tf_demo_parser::{Demo, DemoParser};
 
 const MAGIC: &[u8; 4] = b"TF2R";
-const VERSION: u32 = 3;
+const VERSION: u32 = 4;
 
 /// One projectile snapshot, 24-byte on-disk record:
 /// entity u16, team u8, kind u8, flags u8, then xyz + velocity as
@@ -115,6 +116,19 @@ fn team_str(team: Team) -> &'static str {
 /// player (even ones outside the recorder's PVS), so it is more reliable than
 /// the `m_iHealth` sendprop, which only arrives while the entity is in PVS.
 type HealthOverrides = BTreeMap<u32, (u32, u16)>;
+
+// Debug hook: DEM2REPLAY_DEBUG_EVENTS=1 collects the distinct GameEvent
+// variant names seen in the demo and prints them at the end (useful when a
+// demo turns out not to carry an event the format relies on).
+thread_local! {
+    static DEBUG_EVENT_NAMES: std::cell::RefCell<std::collections::BTreeSet<String>> =
+        std::cell::RefCell::new(std::collections::BTreeSet::new());
+}
+
+fn debug_events_enabled() -> bool {
+    static ENABLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *ENABLED.get_or_init(|| std::env::var("DEM2REPLAY_DEBUG_EVENTS").is_ok())
+}
 
 /// Class base health, matching tf-demo-parser's `Class` enum (which mirrors
 /// TF2's TF_CLASS_* ids). Used as the spawn-health baseline on respawn.
@@ -270,9 +284,253 @@ impl HurtRecord {
     }
 }
 
-/// Collect `player_hurt` events for the current tick and record the victims'
-/// authoritative post-hit health into `overrides` and death ticks into
-/// `deaths`. `cursor` marks how many leading entries of `state.events` were
+/// One engineer building snapshot, exactly the 20-byte on-disk record:
+/// entity u16, team u8, kind u8, flags u8, level u8, health u8 (quantized
+/// health/maxhealth * 255), angle u16 (degrees/360 * 65535), xyz i16 x3
+/// (Source units / 4).
+#[derive(Debug, Clone, Copy)]
+struct BuildingRecord {
+    entity: u16,
+    team: u8,
+    kind: u8, // 0 sentry, 1 dispenser, 2 teleporter entrance, 3 teleporter exit
+    flags: u8, // bit0 building(in-construction), bit1 sapped, bit2 mini
+    level: u8,
+    health: u8,
+    angle: u16,
+    x: f32,
+    y: f32,
+    z: f32,
+}
+
+impl BuildingRecord {
+    fn write(&self, out: &mut Vec<u8>) {
+        out.extend_from_slice(&self.entity.to_le_bytes());
+        out.push(self.team);
+        out.push(self.kind);
+        out.push(self.flags);
+        out.push(self.level);
+        out.push(self.health);
+        out.extend_from_slice(&self.angle.to_le_bytes());
+        out.extend_from_slice(&q16(self.x).to_le_bytes());
+        out.extend_from_slice(&q16(self.y).to_le_bytes());
+        out.extend_from_slice(&q16(self.z).to_le_bytes());
+    }
+}
+
+/// Quantize a yaw in degrees to u16 (degrees/360 * 65535, normalized to [0,360)).
+fn qangle(deg: f32) -> u16 {
+    let normalized = deg.rem_euclid(360.0);
+    ((normalized / 360.0) * 65535.0).round().clamp(0.0, 65535.0) as u16
+}
+
+/// Quantize a building's health to u8 (health/maxhealth * 255).
+fn qhealth(health: u16, max_health: u16) -> u8 {
+    if max_health == 0 {
+        return 0;
+    }
+    ((health as f32 / max_health as f32) * 255.0)
+        .round()
+        .clamp(0.0, 255.0) as u8
+}
+
+/// One static health/ammo kit placement (from kits.json). Positions are
+/// Source units; the on-disk record quantizes them like everything else.
+#[derive(Debug, Clone, Copy)]
+struct KitDef {
+    kind: u8, // 0 health_small, 1 health_medium, 2 health_full, 3 ammo_small, 4 ammo_medium, 5 ammo_full
+    x: f32,
+    y: f32,
+    z: f32,
+}
+
+/// Runtime kit tracking: static placements plus per-kit respawn ticks and
+/// warning bookkeeping for unrecognized `item_pickup` strings.
+struct KitState {
+    kits: Vec<KitDef>,
+    /// Tick at which each kit reappears; 0 = present (never picked up).
+    respawn_at: Vec<u32>,
+    /// Unmatched item strings already warned about (avoid log spam).
+    warned: std::collections::BTreeSet<String>,
+    /// Every distinct `item_pickup` string seen (end-of-run summary).
+    seen_items: std::collections::BTreeSet<String>,
+}
+
+impl KitState {
+    fn new(kits: Vec<KitDef>) -> Self {
+        let respawn_at = vec![0u32; kits.len()];
+        KitState {
+            kits,
+            respawn_at,
+            warned: std::collections::BTreeSet::new(),
+            seen_items: std::collections::BTreeSet::new(),
+        }
+    }
+
+    fn empty() -> Self {
+        Self::new(Vec::new())
+    }
+
+    fn len(&self) -> usize {
+        self.kits.len()
+    }
+
+    /// flags bit0 = present (picked-up kits reappear at respawn_at).
+    fn present(&self, index: usize, tick: u32) -> bool {
+        self.respawn_at[index] == 0 || tick >= self.respawn_at[index]
+    }
+}
+
+/// kits.json class name -> kit kind byte (must match PLAN.md v4).
+fn kit_kind_from_class(class: &str) -> Option<u8> {
+    match class {
+        "item_healthkit_small" => Some(0),
+        "item_healthkit_medium" => Some(1),
+        "item_healthkit_full" => Some(2),
+        "item_ammopack_small" => Some(3),
+        "item_ammopack_medium" => Some(4),
+        "item_ammopack_full" => Some(5),
+        _ => None,
+    }
+}
+
+/// Load the static kit placements written by tools/add_kits_glb.py. The array
+/// order of kits.json defines the kit index emitted in the replay (the viewer
+/// joins on that index).
+fn load_kits(path: &Path) -> Result<Vec<KitDef>, Box<dyn std::error::Error>> {
+    let raw = fs::read_to_string(path)?;
+    let value: Value = serde_json::from_str(&raw)?;
+    let arr = value
+        .as_array()
+        .ok_or("kits.json must be a JSON array")?;
+    let mut kits = Vec::new();
+    for (i, entry) in arr.iter().enumerate() {
+        let class = entry.get("class").and_then(|v| v.as_str()).unwrap_or("");
+        let coord = |key: &str| entry.get(key).and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
+        match kit_kind_from_class(class) {
+            Some(kind) => kits.push(KitDef {
+                kind,
+                x: coord("x"),
+                y: coord("y"),
+                z: coord("z"),
+            }),
+            None => eprintln!(
+                "warning: kits.json entry {} has unknown class {:?}, skipped",
+                i, class
+            ),
+        }
+    }
+    Ok(kits)
+}
+
+/// Classification of an `item_pickup` event string.
+enum ItemKind {
+    /// A kit kind byte (see KitDef).
+    Kit(u8),
+    /// Recognized but not a BSP kit placement (player-dropped medkits).
+    Ignored,
+    /// No mapping known; warned once per distinct string.
+    Unknown,
+}
+
+/// Map an `item_pickup` item string to a kit kind. Strings are matched
+/// case-insensitively by keywords because TF2 mixes naming conventions
+/// ("TF_AMMO_PACK_MEDIUM", "healthkit_small", ...).
+fn classify_item(item: &str) -> ItemKind {
+    let s = item.to_ascii_lowercase();
+    // Medkits are temporary player-created pickups, not map entities.
+    if s.contains("medkit") {
+        return ItemKind::Ignored;
+    }
+    let base = if s.contains("health") {
+        0u8
+    } else if s.contains("ammo") {
+        3u8
+    } else {
+        return ItemKind::Unknown;
+    };
+    let size = if s.contains("small") {
+        0u8
+    } else if s.contains("medium") {
+        1
+    } else if s.contains("full") || s.contains("large") {
+        2
+    } else {
+        return ItemKind::Unknown;
+    };
+    ItemKind::Kit(base + size)
+}
+
+/// Respawn delay in seconds by kit kind (small/medium/full; ammo same scale).
+fn kit_respawn_seconds(kind: u8) -> f32 {
+    match kind % 3 {
+        0 => 10.0,
+        1 => 20.0,
+        _ => 30.0,
+    }
+}
+
+/// Apply an `item_pickup` event: mark the nearest kit of the matching kind as
+/// picked up (respawn tick = now + respawn seconds / intervalPerTick).
+/// Pickups of kinds with no placement nearby (dropped ammo boxes and the
+/// like) are silently ignored.
+fn handle_item_pickup(
+    state: &GameState,
+    pickup: &ItemPickupEvent,
+    kits: &mut KitState,
+    tick: u32,
+    interval_per_tick: f32,
+) {
+    let item: &str = pickup.item.as_ref();
+    kits.seen_items.insert(item.to_string());
+    let kind = match classify_item(item) {
+        ItemKind::Kit(kind) => kind,
+        ItemKind::Ignored => return,
+        ItemKind::Unknown => {
+            if kits.warned.insert(item.to_string()) {
+                eprintln!("warning: unmatched item_pickup string {:?}", item);
+            }
+            return;
+        }
+    };
+    let picker_pos = state
+        .players
+        .iter()
+        .find(|p| {
+            p.info.as_ref().map(|i| u32::from(i.user_id)) == Some(u32::from(pickup.user_id))
+        })
+        .map(|p| p.position)
+        .unwrap_or_default();
+    let mut best: Option<(usize, f32)> = None;
+    for (i, kit) in kits.kits.iter().enumerate() {
+        if kit.kind != kind {
+            continue;
+        }
+        let d2 = (kit.x - picker_pos.x).powi(2)
+            + (kit.y - picker_pos.y).powi(2)
+            + (kit.z - picker_pos.z).powi(2);
+        if best.map_or(true, |(_, best_d2)| d2 < best_d2) {
+            best = Some((i, d2));
+        }
+    }
+    // Kit pickup radius: a player must touch the kit; 200 u is generous but
+    // kit placements are far apart on pl_upward.
+    const MAX_PICKUP_DISTANCE: f32 = 200.0;
+    if let Some((index, d2)) = best {
+        if d2.sqrt() <= MAX_PICKUP_DISTANCE {
+            let ticks = if interval_per_tick > 0.0 {
+                (kit_respawn_seconds(kind) / interval_per_tick).round() as u32
+            } else {
+                0
+            };
+            kits.respawn_at[index] = tick + ticks;
+        }
+    }
+}
+
+/// Collect `player_hurt` and `item_pickup` events for the current tick:
+/// hurts record the victims' authoritative post-hit health into `overrides`
+/// and death ticks into `deaths`; pickups mark the matching kit as taken.
+/// `cursor` marks how many leading entries of `state.events` were
 /// already consumed on earlier ticks: the analyser only ever appends to that
 /// vector and never clears it, so scanning the whole vector every tick would
 /// be O(n) per tick on long demos. Consumed entries sit at indices
@@ -281,17 +539,20 @@ impl HurtRecord {
 ///
 /// Game events are retransmitted by the server in later packets, so the same
 /// event can appear in the vector several times; `seen` (hashes of processed
-/// events) keeps bookkeeping and hurt output idempotent. Each event is
-/// therefore processed at first sight, even if its recorded tick is older
-/// than the current packet tick (late delivery); the current tick is used as
-/// the observation time for overrides and deaths. Hurt records are only
-/// emitted for events whose tick matches the current tick, as before.
-fn hurt_snapshot(
+/// events) keeps bookkeeping, hurt output and kit pickups idempotent. Each
+/// event is therefore processed at first sight, even if its recorded tick is
+/// older than the current packet tick (late delivery); the current tick is
+/// used as the observation time for overrides, deaths and kit respawns. Hurt
+/// records are only emitted for events whose tick matches the current tick,
+/// as before.
+fn event_snapshot(
     state: &GameState,
     cursor: &mut usize,
     overrides: &mut HealthOverrides,
     deaths: &mut BTreeMap<u32, u32>,
     seen: &mut std::collections::HashSet<u64>,
+    kits: &mut KitState,
+    interval_per_tick: f32,
 ) -> Vec<HurtRecord> {
     use std::hash::{Hash, Hasher};
     let mut out = Vec::new();
@@ -315,6 +576,16 @@ fn hurt_snapshot(
         if !seen.insert(hasher.finish()) {
             consumed = i + 1;
             continue;
+        }
+        if debug_events_enabled() {
+            let name = {
+                let s = format!("{:?}", event);
+                let end = s.find(['(', ' ', '{']).unwrap_or(s.len());
+                s[..end].to_string()
+            };
+            DEBUG_EVENT_NAMES.with(|set| {
+                set.borrow_mut().insert(name);
+            });
         }
         consumed = i + 1;
         if let tf_demo_parser::demo::gameevent_gen::GameEvent::PlayerDeath(d) = event {
@@ -376,6 +647,9 @@ fn hurt_snapshot(
                 splash,
             });
         }
+        if let tf_demo_parser::demo::gameevent_gen::GameEvent::ItemPickup(pickup) = event {
+            handle_item_pickup(state, pickup, kits, tick, interval_per_tick);
+        }
     }
     *cursor += consumed;
     // Defensive cap: the on-disk record count is u16 and a runaway event
@@ -415,12 +689,119 @@ fn projectile_snapshot(state: &GameState) -> Vec<ProjectileRecord> {
         .collect()
 }
 
+/// Per-frame cap for the building block (u16 count would allow more, the cap
+/// keeps frames bounded like MAX_HURTS_PER_FRAME).
+const MAX_BUILDINGS_PER_FRAME: usize = 32;
+
+/// Build the building snapshot for a game state. Buildings whose position is
+/// still all-zero have not received their placement sendprops yet (the
+/// analyser creates them on entity entry) and are skipped, as are
+/// non-red/blue teams (spectator/unassigned leftovers).
+fn building_snapshot(state: &GameState, truncations: &mut u64) -> Vec<BuildingRecord> {
+    let tick = u32::from(state.tick);
+    let mut out: Vec<BuildingRecord> = state
+        .buildings
+        .values()
+        .filter_map(|b| {
+            let pos = b.position();
+            if pos.x == 0.0 && pos.y == 0.0 && pos.z == 0.0 {
+                return None;
+            }
+            let team = team_byte(b.team());
+            if team == 0 {
+                return None;
+            }
+            let (kind, building, sapped, mini, level) = match b {
+                Building::Sentry(s) => (0u8, s.building, s.sapped, s.is_mini, s.level),
+                Building::Dispenser(d) => (1u8, d.building, d.sapped, false, d.level),
+                Building::Teleporter(t) => (
+                    if t.is_entrance { 2u8 } else { 3u8 },
+                    t.building,
+                    t.sapped,
+                    false,
+                    t.level,
+                ),
+                // non_exhaustive enum: tolerate future building types.
+                _ => return None,
+            };
+            let mut flags = 0u8;
+            if building {
+                flags |= 1;
+            }
+            if sapped {
+                flags |= 2;
+            }
+            if mini {
+                flags |= 4;
+            }
+            Some(BuildingRecord {
+                entity: u32::from(b.entity_id()) as u16,
+                team,
+                kind,
+                flags,
+                level,
+                health: qhealth(b.health(), b.max_health()),
+                angle: qangle(b.angle()),
+                x: pos.x,
+                y: pos.y,
+                z: pos.z,
+            })
+        })
+        .collect();
+    out.sort_by_key(|r| r.entity);
+    if out.len() > MAX_BUILDINGS_PER_FRAME {
+        *truncations += 1;
+        if *truncations == 1 || *truncations % 1000 == 0 {
+            eprintln!(
+                "warning: truncating building snapshot at tick {} ({} -> {})",
+                tick,
+                out.len(),
+                MAX_BUILDINGS_PER_FRAME
+            );
+        }
+        out.truncate(MAX_BUILDINGS_PER_FRAME);
+    }
+    out
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = env::args();
     let _exe = args.next();
-    let demo_path = args.next().ok_or("usage: dem2replay <demo.dem> <out_dir>")?;
-    let out_dir = args.next().ok_or("usage: dem2replay <demo.dem> <out_dir>")?;
+    let demo_path = args.next().ok_or("usage: dem2replay <demo.dem> <out_dir> [--kits <kits.json>]")?;
+    let out_dir = args.next().ok_or("usage: dem2replay <demo.dem> <out_dir> [--kits <kits.json>]")?;
     let out_dir = PathBuf::from(out_dir);
+
+    // Optional flag: static kit placements (kits.json from add_kits_glb.py).
+    // Without it (or on a load failure) the kit block is emitted with count 0.
+    let mut kits_path: Option<PathBuf> = None;
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--kits" => {
+                let path = args
+                    .next()
+                    .ok_or("--kits requires a kits.json path")?;
+                kits_path = Some(PathBuf::from(path));
+            }
+            other => return Err(format!("unknown argument {:?}", other).into()),
+        }
+    }
+    let mut kits = match &kits_path {
+        Some(path) => match load_kits(path) {
+            Ok(loaded) => KitState::new(loaded),
+            Err(err) => {
+                eprintln!(
+                    "warning: failed to load kits from {} ({}); kit records disabled",
+                    path.display(),
+                    err
+                );
+                KitState::empty()
+            }
+        },
+        None => {
+            eprintln!("note: no --kits path given; kit records disabled");
+            KitState::empty()
+        }
+    };
 
     let file = fs::read(&demo_path)?;
     let demo = Demo::new(&file);
@@ -432,6 +813,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut frame_count: u32 = 0;
     let mut max_players: usize = 0;
     let mut max_projectiles: usize = 0;
+    let mut max_buildings: usize = 0;
+    let mut building_truncations: u64 = 0;
     let mut min_tick: Option<u32> = None;
     let mut max_tick: Option<u32> = None;
     let mut bbox = [f32::INFINITY, f32::INFINITY, f32::INFINITY,
@@ -447,7 +830,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // producing a backwards timeline. `seen_sync` flips on the first tick-0
     // packet (the SyncTick boundary).
     let mut seen_sync = false;
-    // Cursor into the analyser's event vector, see hurt_snapshot().
+    // Cursor into the analyser's event vector, see event_snapshot().
     let mut hurt_cursor: usize = 0;
     // Authoritative health from player_hurt events, per user id (see snapshot).
     let mut health_overrides: HealthOverrides = BTreeMap::new();
@@ -520,14 +903,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             _ => tick,
         };
 
-        // Hurt events must be consumed before the snapshot so this tick's
-        // health corrections are already in place when records are built.
-        let hurts = hurt_snapshot(
+        // Hurt and pickup events must be consumed before the snapshot so this
+        // tick's health corrections and kit respawns are already in place
+        // when records are built.
+        let hurts = event_snapshot(
             state,
             &mut hurt_cursor,
             &mut health_overrides,
             &mut death_ticks,
             &mut seen_events,
+            &mut kits,
+            interval_per_tick,
         );
         let records = snapshot(
             state,
@@ -540,6 +926,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             tick,
         );
         let projectiles = projectile_snapshot(state);
+        let buildings = building_snapshot(state, &mut building_truncations);
         let mut max_proj = 0usize;
         for filled in start..=tick {
             push_u32(&mut frames, filled);
@@ -567,6 +954,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             for h in &hurts {
                 h.write(&mut frames);
             }
+            // v4: buildings block, then kits block. The kit present flag is
+            // evaluated per filled tick so intermediate frames show the
+            // pre-pickup state.
+            frames.extend_from_slice(&(buildings.len() as u16).to_le_bytes());
+            for b in &buildings {
+                b.write(&mut frames);
+            }
+            frames.extend_from_slice(&(kits.len() as u16).to_le_bytes());
+            for (index, kit) in kits.kits.iter().enumerate() {
+                frames.extend_from_slice(&(index as u16).to_le_bytes());
+                frames.push(kit.kind);
+                frames.push(if kits.present(index, filled) { 1 } else { 0 });
+                frames.extend_from_slice(&q16(kit.x).to_le_bytes());
+                frames.extend_from_slice(&q16(kit.y).to_le_bytes());
+                frames.extend_from_slice(&q16(kit.z).to_le_bytes());
+            }
             max_proj = max_proj.max(projectiles.len());
             frame_count += 1;
             min_tick = Some(min_tick.map_or(filled, |m| m.min(filled)));
@@ -574,6 +977,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
         max_players = max_players.max(records.len());
         max_projectiles = max_projectiles.max(max_proj);
+        max_buildings = max_buildings.max(buildings.len());
         last_tick = Some(tick);
     }
 
@@ -652,6 +1056,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("frames:    {}", frame_count);
     println!("max players: {}", max_players);
     println!("max projectiles: {}", max_projectiles);
+    println!("max buildings: {}", max_buildings);
+    if building_truncations > 0 {
+        println!(
+            "building snapshot truncated on {} frames (cap {})",
+            building_truncations, MAX_BUILDINGS_PER_FRAME
+        );
+    }
+    println!("kits:      {}", kits.len());
+    if !kits.seen_items.is_empty() {
+        println!("item_pickup strings seen: {:?}", kits.seen_items);
+    } else {
+        eprintln!("note: no item_pickup events were seen in this demo");
+    }
+    if debug_events_enabled() {
+        DEBUG_EVENT_NAMES.with(|set| println!("debug event variants: {:?}", set.borrow()));
+    }
     println!(
         "tick range: {}..={}",
         min_tick.unwrap_or(0),

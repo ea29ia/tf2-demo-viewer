@@ -91,7 +91,13 @@ async function handleDemoDump(
     await fsp.writeFile(demoPath, body);
     await fsp.mkdir(outDir, { recursive: true });
     const result = await new Promise<{ code: number; stderr: string }>((resolve) => {
-      const child = spawn(dumper, [demoPath, outDir], { stdio: ['ignore', 'ignore', 'pipe'] });
+      // Kits come from the committed kits.json (same file the GLB chain
+      // writes); without it the dumper emits no kit records.
+      const kitsPath = path.join(REPO_ROOT, 'web', 'public', 'maps', 'kits.json');
+      const args = existsSync(kitsPath)
+        ? [demoPath, outDir, '--kits', kitsPath]
+        : [demoPath, outDir];
+      const child = spawn(dumper, args, { stdio: ['ignore', 'ignore', 'pipe'] });
       let stderr = '';
       child.stderr.on('data', (chunk) => { stderr += String(chunk); });
       child.on('error', (err) => resolve({ code: -1, stderr: String(err) }));

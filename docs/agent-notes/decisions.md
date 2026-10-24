@@ -234,3 +234,25 @@ Proper SSBump self-shadowing would need a custom shader pass — not planned.
 Gotcha: the GLB pipeline is append-only; rerunning add_textures on an
 already-textured GLB bloats it with orphaned PNGs — always rebuild the full
 chain from bsp2glb.
+
+## 2026-10-24 — replay.bin v4: buildings tracked from GameState, kits are event-driven (and event-less here)
+Buildings come straight from tf-demo-parser's `GameState.buildings` (the
+analyser clears them on RoundStart and removes them on entity deletion), so
+the dumper only serializes; entity ids are recycled by Source and the same
+entity id can legitimately change team/kind mid-demo — viewer must treat
+records per-frame, not as stable identities. Kits: `item_pickup` game events
+were the planned source, but demp.dem contains NO item_pickup events (not
+even in the GameEventList definitions — verified by byte-grepping the demo);
+pickup events are delivered per-client in TF2 and never reach a POV demo of
+other players' pickups. The event-driven kit tracking is still implemented
+(nearest-kit-of-matching-kind within 200 u, respawn 10/20/30 s by size, case
+and naming-convention tolerant matching, medkit_* ignored as non-map items),
+so kits emit present-bit0=1 for the whole demo until a demo that carries the
+events is dumped. Follow-up option: track kit entities' sendprops
+(m_bRespawning) via a custom message handler if per-kit state is ever needed
+for POV demos. Also: the v4 spec draft said building records are 20 bytes,
+but its field list sums to 15 (2+1+1+1+1+1+2+6) — implemented as 15
+everywhere (PLAN.md, main.rs, replay.ts, validate.py). The 20-byte constant
+slipped into replay.ts first and broke parsing mid-file (frame 5625), caught
+by a node smoke-parse of the real replay.ts against the regenerated bin —
+worth keeping that smoke test in the verification routine for format bumps.

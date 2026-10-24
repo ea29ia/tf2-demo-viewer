@@ -15,11 +15,16 @@ import struct
 import sys
 
 MAGIC = b"TF2R"
-VERSION = 3
+VERSION = 4
 RECORD_SIZE = 27
 PROJ_RECORD_SIZE = 17
 HURT_RECORD_SIZE = 15
+BUILDING_RECORD_SIZE = 15  # 2+1+1+1+1+1+2+2+2+2; a spec draft said 20, the field list sums to 15
+KIT_RECORD_SIZE = 10
 RECORD = struct.Struct("<HBBBHfffff")
+BUILDING = struct.Struct("<HBBBBHBhhh")  # entity,team,kind,flags,level,health,angle,x,y,z(/4)
+KIT = struct.Struct("<HBBhhh")  # index,kind,flags,x,y,z(/4)
+MAX_BUILDINGS_PER_FRAME = 32  # dumper cap
 
 
 def fail(message):
@@ -57,6 +62,8 @@ def parse(path):
 
     frames = []
     max_players = 0
+    max_buildings = 0
+    max_kits = 0
     min_tick = None
     max_tick = None
     bbox = [math.inf, math.inf, math.inf, -math.inf, -math.inf, -math.inf]
@@ -137,6 +144,73 @@ def parse(path):
                 fail(f"truncated hurt records at frame {index}")
             pos += need
 
+        if version >= 4:
+            if pos + 2 > len(data):
+                fail(f"truncated building header at frame {index}")
+            (building_count,) = struct.unpack_from("<H", data, pos)
+            pos += 2
+            if building_count > MAX_BUILDINGS_PER_FRAME:
+                fail(
+                    f"frame {index}: bad building count {building_count}"
+                    f" (dumper cap {MAX_BUILDINGS_PER_FRAME})"
+                )
+            need = building_count * BUILDING_RECORD_SIZE
+            if pos + need > len(data):
+                fail(f"truncated building records at frame {index}")
+            for _ in range(building_count):
+                (
+                    entity,
+                    team,
+                    kind,
+                    flags,
+                    level,
+                    health,
+                    angle,
+                    x,
+                    y,
+                    z,
+                ) = BUILDING.unpack_from(data, pos)
+                pos += BUILDING_RECORD_SIZE
+                if team not in (2, 3):
+                    fail(f"frame {index}: bad building team {team}")
+                if kind > 3:
+                    fail(f"frame {index}: bad building kind {kind}")
+                if flags & ~0x07:
+                    fail(f"frame {index}: unknown building flag bits {flags:#x}")
+                if level > 3:
+                    fail(f"frame {index}: bad building level {level}")
+                if x == 0 and y == 0 and z == 0:
+                    fail(f"frame {index}: building {entity} at zero position")
+            max_buildings = max(max_buildings, building_count)
+
+            if pos + 2 > len(data):
+                fail(f"truncated kit header at frame {index}")
+            (kit_count,) = struct.unpack_from("<H", data, pos)
+            pos += 2
+            if kit_count > 1000:
+                fail(f"frame {index}: bad kit count {kit_count}")
+            need = kit_count * KIT_RECORD_SIZE
+            if pos + need > len(data):
+                fail(f"truncated kit records at frame {index}")
+            for kit_index in range(kit_count):
+                index_, kind, flags, x, y, z = KIT.unpack_from(data, pos)
+                pos += KIT_RECORD_SIZE
+                if kind > 5:
+                    fail(f"frame {index}: bad kit kind {kind}")
+                if flags & ~0x01:
+                    fail(f"frame {index}: unknown kit flag bits {flags:#x}")
+                if kit_index == 0:
+                    first_kit_index = index_
+                    kit_kinds = set()
+                else:
+                    if index_ <= first_kit_index:
+                        fail(f"frame {index}: kit indexes not increasing")
+                    first_kit_index = index_
+                kit_kinds.add(kind)
+            if kit_count > 0 and len(kit_kinds) < 2:
+                fail(f"frame {index}: only one kit kind present ({kit_kinds})")
+            max_kits = max(max_kits, kit_count)
+
         frames.append((tick, count))
 
     if pos != len(data):
@@ -144,7 +218,7 @@ def parse(path):
     if "frames" in meta and meta["frames"] != frame_count:
         fail(f"meta frames={meta['frames']} != frame_count={frame_count}")
 
-    return meta, frames, max_players, (min_tick, max_tick), bbox, sample
+    return meta, frames, max_players, max_buildings, max_kits, (min_tick, max_tick), bbox, sample
 
 
 def main(argv):
@@ -152,13 +226,15 @@ def main(argv):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     path = argv[1]
-    meta, frames, max_players, tick_range, bbox, sample = parse(path)
+    meta, frames, max_players, max_buildings, max_kits, tick_range, bbox, sample = parse(path)
 
     print(f"file:        {path}")
     print(f"map:         {meta.get('map')}")
     print(f"nick:        {meta.get('nick')}")
     print(f"frame_count: {len(frames)}")
     print(f"max_players: {max_players}")
+    print(f"max_buildings: {max_buildings}")
+    print(f"max_kits:    {max_kits}")
     print(f"tick_range:  {tick_range[0]}..{tick_range[1]}")
     print(
         "bbox:        x[{:.3f},{:.3f}] y[{:.3f},{:.3f}] z[{:.3f},{:.3f}]".format(
